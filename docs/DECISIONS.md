@@ -181,6 +181,20 @@ Markdown export comes with the UI.
 
 **Tests.** `src/store/store.test.ts` runs the real store against `fake-indexeddb`.
 
+## 17. UI interaction rules — Accepted
+
+**Principle.** Capture always feels immediate. Retrieval can be powerful, but never at the cost of complicating capture.
+
+- **Capture and search are separate.** The capture bar always saves on Enter. Search opens with `/` or `Ctrl+K`. No live search results under the capture bar, so Enter is never ambiguous.
+- **Capture never waits.** The bar is usable before the store has finished opening (a capture made early is saved once it's ready). The persistent-storage request (#4) fires after the first capture and is never awaited.
+- **Mobile.** No programmatic refocus after a capture: the keyboard stays open if it was open, and is never forced back open. Autofocus on load only with a fine pointer (desktop).
+- **Global shortcuts** never fire while focus is in an input, textarea, select or contenteditable element, or while an IME composition is in progress.
+- **Undo really reverses.** Undo restores the item's exact previous record (and search entry), not an approximate inverse operation.
+- **Cross-tab.** Search indexes stay in sync across tabs without reloads.
+- **Snooze** is separate from due dates and never changes `capturedAt`. Presets: Later today, Tomorrow, Next week, Pick date/time (rules in `src/model/snooze.ts`).
+- **Snoozed items** are hidden from Inbox, Today and Upcoming while the snooze is active; they stay in Everything and search.
+- **Completed items** leave Today and Upcoming immediately; Everything shows them in a separate Completed section.
+
 ---
 
 ## Item schema
