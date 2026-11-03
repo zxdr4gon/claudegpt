@@ -37,6 +37,8 @@ export function prepareImportedItem(raw: unknown): Item | null {
   try {
     const item = upgradeShape(raw);
     if (!isValidItem(item)) return null;
+    // Written by a newer app whose parser this one doesn't understand.
+    if (item.parserVersion > PARSER_VERSION) return null;
     // Items from an older parser are upgraded the same way as on startup.
     const prepared = item.parserVersion < PARSER_VERSION ? reparse(item) : item;
     return isValidItem(prepared) ? prepared : null;

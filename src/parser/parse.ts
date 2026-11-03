@@ -83,6 +83,13 @@ const NAMED_ZONES: Record<string, string> = {
 };
 const ZONE_LABEL_RE = /([a-z]{1,5}(?:\s*[+-]\s*\d{1,2}(?::?\d{2})?)?)\s*$/iu;
 
+/** e.g. 330 → "UTC+05:30"; a fallback label when the zone text can't be isolated. */
+function formatOffset(minutes: number): string {
+  const sign = minutes < 0 ? '-' : '+';
+  const abs = Math.abs(minutes);
+  return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
+}
+
 function toDue(result: chrono.ParsedResult, ref: ParseRef): Due {
   const c = result.start;
   const here = { type: 'iana', tz: ref.tz } as const;
@@ -97,7 +104,8 @@ function toDue(result: chrono.ParsedResult, ref: ParseRef): Due {
   // certain for durations, so those are excluded here.
   if (!elapsed && c.isCertain('timezoneOffset')) {
     const minutes = c.get('timezoneOffset')!;
-    const label = (ZONE_LABEL_RE.exec(result.text)?.[1] ?? '').replace(/\s+/gu, '').toUpperCase();
+    const label =
+      (ZONE_LABEL_RE.exec(result.text)?.[1] ?? '').replace(/\s+/gu, '').toUpperCase() || formatOffset(minutes);
     const named = NAMED_ZONES[label];
     if (named) {
       // Re-read the wall time chrono parsed and apply the zone's real rules.

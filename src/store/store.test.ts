@@ -353,3 +353,19 @@ describe('legacy data (v1 timed due dates stored `tz` instead of `zone`)', () =>
   });
 
 });
+
+describe('backup entries from a newer parser', () => {
+  it('rejects unsupported future parser versions instead of importing them', async () => {
+    const store = await openStore();
+    const item = await store.capture('from the future');
+    await db.items.clear();
+    const result = await importBackup(store, {
+      format: 'claudegpt-backup',
+      version: 1,
+      exportedAt: now,
+      items: [{ ...item, parserVersion: PARSER_VERSION + 1 }, { ...item, id: 'current' }],
+    });
+    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: 1 });
+    expect(await store.get(item.id)).toBeUndefined();
+  });
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Item } from './item';
 import { createItem, setDue } from './items';
-import { isValidItem, upgradeShape } from './migrate';
+import { isCalendarDate, isValidItem, upgradeShape } from './migrate';
 
 const clock = { now: Date.UTC(2026, 10, 2, 4), tz: 'Asia/Dhaka' };
 const timed = createItem('call mom tomorrow 3pm #family !! https://x.com', clock, 'id1');
@@ -36,11 +36,51 @@ describe('upgradeShape', () => {
   });
 });
 
+const offsetDue = (minutes: number, label: string) => ({
+  value: { type: 'instant', at: 1, zone: { type: 'offset', minutes, label } },
+  source: 'user',
+});
+
+describe('isCalendarDate', () => {
+  it.each([
+    ['2026-11-03', true],
+    ['2028-02-29', true],
+    ['2026-12-31', true],
+    ['2026-02-29', false],
+    ['2026-02-31', false],
+    ['2026-04-31', false],
+    ['2026-00-10', false],
+    ['2026-11-00', false],
+    ['2026-1-3', false],
+    ['03/11/2026', false],
+    [20261103, false],
+  ])('%j → %s', (input, expected) => {
+    expect(isCalendarDate(input)).toBe(expected);
+  });
+});
+
 describe('isValidItem', () => {
   it('accepts real items', () => {
     expect(isValidItem(timed)).toBe(true);
     expect(isValidItem(createItem('a thought', clock, 'x'))).toBe(true);
     expect(isValidItem(JSON.parse(JSON.stringify(timed)))).toBe(true);
+  });
+
+  // The parser and the validator must agree, or the app's own backups wouldn't import.
+  it.each([
+    'call at 5pm EST',
+    'deploy 17:00 UTC',
+    'call 5pm GMT+3',
+    'standup noon ET',
+    'tomorrow 9am PST',
+    'in 2 days at 9am PST',
+    'in 3 hours',
+    'dentist tomorrow 3pm',
+    'gift for dec 3',
+    'file taxes 3/4',
+    'review monday morning #work !!! https://example.com/a',
+  ])('everything the parser produces is valid: %j', (text) => {
+    expect(isValidItem(createItem(text, clock, 'p'))).toBe(true);
   });
 
   it('rejects the legacy shape until it is upgraded', () => {
@@ -65,6 +105,14 @@ describe('isValidItem', () => {
     ['due instant without zone', (i) => (i.due = { value: { type: 'instant', at: 1 }, source: 'user' })],
     ['due bad zone', (i) => (i.due = { value: { type: 'instant', at: 1, zone: { type: 'iana', tz: 'Mars/Base' } }, source: 'user' })],
     ['due bad offset', (i) => (i.due = { value: { type: 'instant', at: 1, zone: { type: 'offset', minutes: 'x', label: 'EST' } }, source: 'user' })],
+    ['due impossible date', (i) => (i.due = { value: { type: 'date', date: '2026-02-31' }, source: 'user' })],
+    ['due Feb 29 in a common year', (i) => (i.due = { value: { type: 'date', date: '2026-02-29' }, source: 'user' })],
+    ['due month 13', (i) => (i.due = { value: { type: 'date', date: '2026-13-01' }, source: 'parsed' })],
+    ['offset above +14:00', (i) => (i.due = offsetDue(14 * 60 + 1, 'X'))],
+    ['offset below -12:00', (i) => (i.due = offsetDue(-12 * 60 - 1, 'X'))],
+    ['fractional offset', (i) => (i.due = offsetDue(60.5, 'X'))],
+    ['empty offset label', (i) => (i.due = offsetDue(-300, ''))],
+    ['blank offset label', (i) => (i.due = offsetDue(-300, '   '))],
     ['due NaN instant', (i) => (i.due = { value: { type: 'instant', at: NaN, zone: { type: 'iana', tz: 'UTC' } }, source: 'user' })],
     ['due bad ref', (i) => (i.due = { ...(i.due as object), ref: { at: 'now', tz: 'UTC' } })],
     ['priority 4', (i) => (i.priority = { value: 4, source: 'user' })],
@@ -83,6 +131,15 @@ describe('isValidItem', () => {
     ['updatedAt Infinity', (i) => (i.updatedAt = Infinity)],
     ['deletedAt string', (i) => (i.deletedAt = 'yesterday')],
   ];
+
+  it.each<[string, unknown]>([
+    ['offset at +14:00', offsetDue(14 * 60, 'LINT')],
+    ['offset at -12:00', offsetDue(-12 * 60, 'AOE')],
+    ['quarter-hour offset', offsetDue(345, 'NPT')],
+    ['leap day', { value: { type: 'date', date: '2028-02-29' }, source: 'user' }],
+  ])('accepts %s', (_name, due) => {
+    expect(isValidItem({ ...timed, due })).toBe(true);
+  });
 
   it.each(broken)('rejects %s', (_name, breakIt) => {
     const item = structuredClone(timed) as unknown as Record<string, unknown>;
