@@ -47,11 +47,18 @@ Free text, with these recognized inline:
 
 While typing, detected spans are highlighted inline and summarized as chips under the input (e.g. `📅 Fri 7 Nov, 17:00` · `#groceries`). Clicking a chip edits or removes it. After saving, the same chips appear on the item and stay editable.
 
+The text itself is always shown as written — syntax is highlighted, never hidden.
+
+**How edits behave:**
+- Relative dates are resolved when you type them. Editing an item resolves *newly typed* dates from the moment of the edit; fixing a typo elsewhere won't move an existing date.
+- Remove syntax from the text and its detected value goes away with it.
+- Anything you set or remove by hand stays that way, whatever the text says.
+
 ## MVP views
 
 | View | Contents | Notes |
 |---|---|---|
-| **Inbox** | Recently captured items with no due date that haven't been touched | A convenience, not an obligation. No count badge. Items quietly age out of Inbox (they remain in Everything and search). |
+| **Inbox** | Open, unsnoozed items with no due date, captured in the last 7 days | A convenience, not an obligation. No count badge. Items quietly age out after 7 days (they remain in Everything and search). |
 | **Today** | Items due today, plus an "Earlier" section for past-due open tasks | "Earlier" is collapsed and neutral-colored — no red, no counter shaming. |
 | **Upcoming** | Items with future due dates, grouped by day | |
 | **Everything** | All non-archived items, newest first | Filterable by kind and tag. |
