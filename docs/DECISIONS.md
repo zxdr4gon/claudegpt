@@ -14,7 +14,7 @@ Status values: **Accepted**, **Proposed** (awaiting review), **Superseded by #N*
 
 ## 2. Stack — Accepted
 
-React + TypeScript + Vite + Tailwind. Dexie over IndexedDB. MiniSearch for search. chrono-node for date parsing. `vite-plugin-pwa` for offline/install. Vitest for unit tests, Playwright for end-to-end.
+React + TypeScript + Vite + Tailwind (v3, see #15). Dexie over IndexedDB. MiniSearch for search. chrono-node for date parsing. `vite-plugin-pwa` for offline/install. Vitest for unit tests, Playwright for end-to-end.
 
 **Consequences.** Dexie's `liveQuery` is the primary state mechanism; the database is the source of truth. A tiny UI-state store (e.g. Zustand) only if needed — no Redux.
 
@@ -47,7 +47,7 @@ React + TypeScript + Vite + Tailwind. Dexie over IndexedDB. MiniSearch for searc
 
 **Consequences.** A correction always sticks. The UI can distinguish "detected" from "set by you". Dismissed markers are hidden from display.
 
-## 7. Date representation and resolution — Accepted (amended)
+## 7. Date representation and resolution — Accepted
 
 **Context.** "Tomorrow" means different things depending on when and where it was typed. Calendar dates and instants are different things and should be stored differently.
 **Decision.** Relative expressions are resolved to absolute values at parse time. `due` is one of two shapes:
@@ -59,10 +59,27 @@ Each parsed `due` also stores **`ref: { at, tz }`** — the timestamp and IANA t
 **Reference time:**
 - At capture: `ref` = capture time and current timezone.
 - On text edit: `ref` = edit time and current timezone (if you type "tomorrow" today, you mean tomorrow from today). `capturedAt` is never changed.
-- **Unchanged date text keeps its old resolution** *(proposed amendment)*. If the edit leaves the matched date text identical (e.g. the user fixes a typo elsewhere in "call dentsit tomorrow"), the existing `due` and its `ref` are kept. Only a date expression whose matched text changed, or is new, is resolved against the edit time. Without this, fixing a typo would silently move the due date.
-- On parser-version re-parse (no text edit): the stored `ref` is reused.
+- **An untouched date expression keeps its old resolution.** If the edit leaves the matched date text itself untouched (e.g. the user fixes a typo elsewhere in "call dentsit tomorrow"), the existing `due` keeps its `ref`. Only a date expression that is new or changed is resolved against the edit time. Without this, fixing a typo would silently move the due date.
+- On parser-version re-parse (no text edit): the stored refs are reused, so the result never depends on the current time.
 
-**Consequences.** Test suite must cover DST transitions, timezone boundaries, and the unchanged-date-text rule.
+**Which expression is the due date.** The parser finds every date expression; the first one in the text is the due date (the *primary*). Only the primary is highlighted.
+
+**How "untouched" is decided** (compare matched text, never the whole item):
+1. The old primary's character span is tracked through the edit with a character diff (common prefix/suffix, then an LCS of the changed middle).
+2. It is untouched only if every character of that span survived, still contiguous, *and* lands exactly on the new primary's span.
+3. If so, the expression is re-resolved against its original `ref` (identical result under the same parser version). Otherwise the new primary resolves against the edit time.
+
+Tracking by position rather than by text means duplicates can't inherit each other's resolution: in "tomorrow prep, tomorrow review", deleting the first "tomorrow" makes the second the primary, and it resolves from the edit time because it wasn't the span that was resolved before. Edits inside the expression ("tomorrow" → "tomorrow 3pm") count as changes.
+
+**Parsing rules for the stored shape.**
+- A time-of-day the user stated ("3pm", "15:00") makes an instant. The wall time is converted with the zone's rules *for the target date*, so "tomorrow 9am" across a DST switch is still 9am.
+- An explicit zone ("5pm EST") or a duration ("in 3 hours") is an exact instant: elapsed time, not wall time.
+- Vague times of day ("tonight", "monday morning") stay all-day dates.
+- "now" is not treated as a due date.
+- Numeric dates are read US-style (`3/4` = March 4) until locale settings exist.
+- Times landing in a DST gap shift forward by the gap; ambiguous times take the earlier instant.
+
+**Consequences.** Covered by table-driven tests in `src/parser/parse.test.ts` and `src/model/items.test.ts`, run under an unusual host timezone (`Pacific/Chatham`) to prove nothing depends on the machine's zone.
 
 ## 8. Parser versioning — Accepted
 
@@ -90,7 +107,7 @@ Each parsed `due` also stores **`ref: { at, tz }`** — the timestamp and IANA t
 **Context.** Product principle: the app must stay useful without upkeep and must never induce organizational guilt.
 **Decision.**
 - No unread or item counts on Inbox or any view.
-- **Inbox** = items that are open, have no due date, are not snoozed, and were captured within the last **7 days** (by `capturedAt`). Not configurable in MVP. Items age out automatically and remain in Everything and search.
+- **Inbox** = items that are open, have no due date (a dismissed date counts as none), are not *actively* snoozed, and were captured within the last **7 days** (by `capturedAt`, not last edit). An item whose `snoozedUntil` has passed qualifies again automatically. Not configurable in MVP. Items age out automatically and remain in Everything and search.
 - Past-due tasks appear in a collapsed, neutral "Earlier" section of Today — no red, no counters.
 - No streaks, no review prompts, no required fields beyond text.
 
@@ -111,7 +128,7 @@ Each parsed `due` also stores **`ref: { at, tz }`** — the timestamp and IANA t
 **Context.** Text edits and parser upgrades both trigger re-parsing. The outcome must be predictable.
 **Decision.** On re-parse:
 1. **User-owned values are never modified**, including dismissed markers.
-2. **Parsed values found again are updated** (subject to the unchanged-date-text rule in #7).
+2. **Parsed values found again are updated** (subject to the untouched-date-expression rule in #7).
 3. **Parsed values no longer found are removed.** If the user deletes "#groceries" from the text, the parsed `groceries` tag goes away. If they delete "tomorrow", the parsed due date goes away.
 4. **New syntax produces new parsed values**, unless blocked by a dismissed marker for the same field/tag.
 5. `kind` is always present: if parsed, it is recomputed from the new text.
@@ -119,9 +136,17 @@ Each parsed `due` also stores **`ref: { at, tz }`** — the timestamp and IANA t
 
 **Consequences.** The text remains the source of truth for parsed data; user corrections remain the source of truth for everything they touched.
 
+## 15. Tailwind v3 via PostCSS — Accepted
+
+**Context.** Tailwind v4 depends on a native binary (`@tailwindcss/oxide`). On the primary dev machine, Windows Application Control blocks that binary, and both the Vite plugin and the WASM fallback hang instead of failing. That stalled `vite build` and `vitest`.
+**Decision.** Use Tailwind v3 (pure JavaScript) through PostCSS. Vitest has its own `vitest.config.ts` with no Vite plugins, since the tests are pure logic.
+**Consequences.** v3 config style (`tailwind.config.js`, `@tailwind` directives). Upgrading to v4 later is mechanical if the native-binary issue goes away.
+
 ---
 
 ## Item schema
+
+The source of truth is `src/model/item.ts`; this copy is for reading.
 
 ```ts
 type Provenance = 'parsed' | 'user';
@@ -144,6 +169,7 @@ type Item = {
   id: string;                 // ULID
   rawText: string;            // exactly as captured; immutable (#5)
   text: string;               // current text; user-editable
+  textRef: ParseRef;          // capture time, then time of last text edit (#7)
 
   kind: Field<'task' | 'note' | 'link'>;   // value never null
   due?: Field<Due> & { ref?: ParseRef };   // ref present when parsed
@@ -167,4 +193,4 @@ type Item = {
 
 ## Open questions
 
-None blocking. One item awaiting confirmation: the **unchanged-date-text rule** in #7.
+None.
