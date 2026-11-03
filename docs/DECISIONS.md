@@ -196,6 +196,20 @@ Markdown export comes with the UI.
 - **Snoozed items** are hidden from Inbox, Today and Upcoming while the snooze is active; they stay in Everything and search.
 - **Completed items** leave Today and Upcoming immediately; Everything shows them in a separate Completed section.
 
+## 18. Item actions and undo — Accepted
+
+**Decision.** Every item action (`src/store/actions.ts`) is one pure model function run through `ItemStore.change(id, fn)`, which returns the exact stored record **before** and **after**, read and written in one transaction.
+
+Undo restores, it never inverts:
+- `UndoStack` (`src/store/undo.ts`) keeps `{ label, before, after }` per action. Undo writes back the exact `before` record through `ItemStore.revert()`, and the search entry is restored from that same record. Text, parsed values, spans, provenance, dismissals, status and all timestamps (including `updatedAt`) come back exactly.
+- `revert()` runs in a transaction and only proceeds if the item is still exactly `after` (structural equality). If anything changed since, in this tab or another, the undo is refused and nothing is overwritten.
+- An entry leaves the stack before any await, so a double-clicked undo can't apply the same entry twice.
+- Actions that change nothing aren't recorded.
+
+**Tests.** `src/store/actions.test.ts`: every action followed by undo is compared to the exact previous record and search results; plus reverse-order undos, a double-clicked undo, an undo racing a new action, undoing an older change after a newer one (refused), and an item deleted underneath. Removing the "still exactly `after`" guard makes the safety tests fail.
+
+**Trade-off.** Restoring `updatedAt` means an undone change looks as if it never happened. That's the intended meaning of undo; for future sync, the undo itself may need a fresh `updatedAt` to win last-write-wins. Revisit with sync.
+
 ---
 
 ## Item schema

@@ -163,6 +163,19 @@ describe('snoozeUntil', () => {
       expect(snoozeUntil('laterToday', { now, tz: NY })).toBe(expected);
     });
 
+    // Lord Howe springs forward by 30 minutes on Sun 4 Oct 2026: 02:00 LHST (+10:30)
+    // becomes 02:30 LHDT (+11) at 15:30Z, so local 02:00 doesn't exist.
+    it.each<[string, number, number]>([
+      // Threshold 01:20 LHST (14:50Z). The next hour boundary is the jump itself: 02:30 LHDT.
+      ['next boundary is the jump: ends at the jump', utc(2026, 10, 3, 11, 50), utc(2026, 10, 3, 15, 30)],
+      // Threshold 02:40 LHDT (15:40Z), just after the jump. Next existing full hour: 03:00 LHDT.
+      ['just after the jump: next full hour', utc(2026, 10, 3, 12, 40), utc(2026, 10, 3, 16)],
+      // Threshold 00:20 LHST (13:50Z), same night, before the jump: 01:00 LHST.
+      ['same night, before the jump: next full hour', utc(2026, 10, 3, 10, 50), utc(2026, 10, 3, 14, 30)],
+    ])('Lord Howe, %s', (_name, now, expected) => {
+      expect(snoozeUntil('laterToday', { now, tz: 'Australia/Lord_Howe' })).toBe(expected);
+    });
+
     it('is always at least 3 and under 4 elapsed hours away, on a full local hour', () => {
       for (const tz of [NY, 'Europe/London', 'Australia/Lord_Howe', 'Asia/Kathmandu']) {
         // Every 10 minutes across both 2026 transition weekends for each zone.

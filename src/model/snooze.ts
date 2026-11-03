@@ -20,6 +20,18 @@ function morningOf(date: string, tz: string): number {
   return zonedWallToInstant({ year, month, day, hour: MORNING_HOUR, minute: 0, second: 0 }, tz);
 }
 
+/**
+ * "Pick date/time": a local 'YYYY-MM-DDTHH:mm' (as from <input type="datetime-local">)
+ * in the viewer's zone, as an instant. Null if malformed or not in the future.
+ */
+export function snoozeAtLocal(value: string, clock: Clock): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/u.exec(value);
+  if (!m) return null;
+  const [year, month, day, hour, minute] = m.slice(1).map(Number) as [number, number, number, number, number];
+  const at = zonedWallToInstant({ year, month, day, hour, minute, second: 0 }, clock.tz);
+  return Number.isFinite(at) && at > clock.now ? at : null;
+}
+
 export function snoozeUntil(preset: SnoozePreset, clock: Clock): number {
   const today = dateIn(clock.now, clock.tz);
   switch (preset) {

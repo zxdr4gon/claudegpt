@@ -11,6 +11,28 @@ import { SearchIndex, type SearchOptions } from '../search/index';
 /** Soft-deleted items are purged after this long (DECISIONS #9). */
 export const DELETE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** One write to one item: the stored record before and after it. */
+export type Change = { before: Item; after: Item };
+
+/**
+ * Structural equality for stored records. A key holding `undefined` counts as
+ * absent, since storage may keep or drop such keys.
+ */
+export function sameRecord(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const bb = b as unknown[];
+    return a.length === bb.length && a.every((x, i) => sameRecord(x, bb[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
+  for (const k of keys) if (!sameRecord(ao[k], bo[k])) return false;
+  return true;
+}
+
 export class ItemNotFoundError extends Error {
   constructor(id: string) {
     super(`Item not found: ${id}`);
@@ -77,17 +99,41 @@ export class ItemStore {
     return item;
   }
 
-  /** Apply a model function to one item, atomically. */
-  async update(id: string, change: (item: Item, clock: Clock) => Item): Promise<Item> {
-    const updated = await this.db.transaction('rw', this.db.items, async () => {
-      const item = await this.db.items.get(id);
-      if (!item) throw new ItemNotFoundError(id);
-      const next = change(item, this.clock());
-      if (next !== item) await this.db.items.put(next);
-      return next;
+  /**
+   * Apply a model function to one item, atomically. Returns the exact stored
+   * record before and after, which is what undo restores (DECISIONS #18).
+   */
+  async change(id: string, fn: (item: Item, clock: Clock) => Item): Promise<Change> {
+    const result = await this.db.transaction('rw', this.db.items, async () => {
+      const before = await this.db.items.get(id);
+      if (!before) throw new ItemNotFoundError(id);
+      const after = fn(before, this.clock());
+      if (after !== before) await this.db.items.put(after);
+      return { before, after };
     });
-    this.index.upsert(updated);
-    return updated;
+    this.index.upsert(result.after);
+    return result;
+  }
+
+  async update(id: string, fn: (item: Item, clock: Clock) => Item): Promise<Item> {
+    return (await this.change(id, fn)).after;
+  }
+
+  /**
+   * Undo a change by writing back its exact `before` record. Refused (false)
+   * unless the item is still exactly the change's `after`, so undoing an older
+   * action can never overwrite anything done since.
+   */
+  async revert(change: Change): Promise<boolean> {
+    const { before, after } = change;
+    const reverted = await this.db.transaction('rw', this.db.items, async () => {
+      const current = await this.db.items.get(after.id);
+      if (!current || !sameRecord(current, after)) return false;
+      await this.db.items.put(before);
+      return true;
+    });
+    if (reverted) this.index.upsert(before);
+    return reverted;
   }
 
   editText = (id: string, text: string) => this.update(id, (i, c) => model.editText(i, text, c));
