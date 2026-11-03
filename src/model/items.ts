@@ -193,3 +193,31 @@ export function resetTag(item: Item, value: string, clock: Clock): Item {
   const tag = normalizeTag(value);
   return touch(item, clock, { tags: item.tags.filter((t) => t.value !== tag) });
 }
+
+// --- Status ------------------------------------------------------------------
+// These don't touch text or parsed values, so no re-parse.
+
+export function setStatus(item: Item, status: Item['status'], clock: Clock): Item {
+  if (item.status === status) return item;
+  return {
+    ...item,
+    status,
+    completedAt: status === 'done' ? clock.now : undefined,
+    updatedAt: clock.now,
+  };
+}
+
+/** `null` clears the snooze. */
+export function snooze(item: Item, until: number | null, clock: Clock): Item {
+  return { ...item, snoozedUntil: until ?? undefined, updatedAt: clock.now };
+}
+
+export function softDelete(item: Item, clock: Clock): Item {
+  if (item.deletedAt != null) return item;
+  return { ...item, deletedAt: clock.now, updatedAt: clock.now };
+}
+
+export function restore(item: Item, clock: Clock): Item {
+  if (item.deletedAt == null) return item;
+  return { ...item, deletedAt: undefined, updatedAt: clock.now };
+}

@@ -103,6 +103,15 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 **Budget.** < 50 ms keystroke-to-results at 10k items; index build on load kept under ~300 ms at 10k items. If load time exceeds budget, persist the serialized index (MiniSearch `toJSON`) and rebuild lazily.
 **Consequences.** Search lives entirely in memory; acceptable up to tens of thousands of items.
 
+**Matching rules** (`src/search/index.ts`):
+- Indexed fields: `text`, active tags (boosted ×2), `url`. Deleted items are never indexed. Dismissed tags aren't indexed, but the words of the text always are: dismissing `#japan` doesn't hide an item whose text says "#japan".
+- Every word must match (AND). Case and accents are ignored ("cafe" finds "café").
+- Only the last word is prefix-matched, and only once it has 2+ letters. A one-letter trailing word after other words is ignored ("dentist t" shows the results for "dentist"), so results don't flicker to empty and a single letter can't expand to most of the vocabulary.
+- Typo tolerance (edit distance 20% of length) for words of 4+ letters. Known gap: a typo *while the word is still incomplete* ("insurn") matches nothing until the word is finished ("insurnce" → "insurance").
+- Archived items are excluded unless requested; done items are included.
+
+**Measured** (10k generated items, this dev machine, `src/search/search.perf.test.ts`): index build ~130–150 ms; per keystroke median ~3 ms, worst ~34 ms; incremental update ~0.03 ms. The test asserts the budgets with 3× headroom so slower CI machines don't flake.
+
 ## 11. No-maintenance UX rules — Accepted
 
 **Context.** Product principle: the app must stay useful without upkeep and must never induce organizational guilt.
@@ -142,6 +151,21 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 **Context.** Tailwind v4 depends on a native binary (`@tailwindcss/oxide`). On the primary dev machine, Windows Application Control blocks that binary, and both the Vite plugin and the WASM fallback hang instead of failing. That stalled `vite build` and `vitest`.
 **Decision.** Use Tailwind v3 (pure JavaScript) through PostCSS. Vitest has its own `vitest.config.ts` with no Vite plugins, since the tests are pure logic.
 **Consequences.** v3 config style (`tailwind.config.js`, `@tailwind` directives). Upgrading to v4 later is mechanical if the native-binary issue goes away.
+
+## 16. Storage layer — Accepted
+
+**Decision.** `ItemStore` (`src/store/store.ts`) is the only code that writes items.
+- Each write runs a pure model function (`src/model/items.ts`) inside a Dexie read-modify-write transaction, then updates the search index after the transaction commits. A generic `update(id, fn)` covers every user correction, so new model operations need no new store code.
+- On open: items with an older `parserVersion` are re-parsed (deterministically, from stored references, without changing `updatedAt`), then the index is built from the database.
+- Soft-deleted items are hard-deleted by `purgeDeleted()` after **30 days**.
+- Time comes from an injected clock, so tests control it.
+- The schema has a `meta` table for small app facts (e.g. `lastExportAt` for the backup hint in #4). Dexie version blocks are never edited, only added.
+
+**Backup** (`src/store/backup.ts`): JSON `{ format: 'claudegpt-backup', version: 1, exportedAt, items }`, including soft-deleted items so a restore is faithful. Import merges per item with last-write-wins on `updatedAt` (the same rule future sync will use); new items keep `capturedAt` and get `createdAt` = now; items from older parsers are upgraded; malformed entries are counted and skipped; non-backups and backups from a newer app version are rejected. Markdown export comes with the UI.
+
+**Known limitation.** The index is per tab. If the app is open in two tabs, writes in one reach the other's database (and Dexie `liveQuery` views) but not its search index until reload. Fix when the UI exists, via Dexie's cross-tab change events.
+
+**Tests.** `src/store/store.test.ts` runs the real store against `fake-indexeddb`.
 
 ---
 
