@@ -11,18 +11,29 @@ const LIMIT = 50;
 
 export class UndoStack {
   private entries: UndoEntry[] = [];
+  private lastPushed: UndoEntry | undefined;
   private listeners = new Set<() => void>();
 
   /** Record a change. No-ops (nothing actually changed) aren't recorded. */
   push(label: string, change: Change): void {
     if (sameRecord(change.before, change.after)) return;
-    this.entries.push({ label, change });
+    const entry = { label, change };
+    this.entries.push(entry);
+    this.lastPushed = entry;
     if (this.entries.length > LIMIT) this.entries.shift();
     this.emit();
   }
 
   latest(): UndoEntry | undefined {
     return this.entries[this.entries.length - 1];
+  }
+
+  /**
+   * The most recently recorded action, even if already undone. The toast
+   * follows this, so undoing never resurfaces an older action's toast.
+   */
+  recent(): UndoEntry | undefined {
+    return this.lastPushed;
   }
 
   /**

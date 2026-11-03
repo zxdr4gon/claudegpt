@@ -180,6 +180,16 @@ describe('undo under rapid interactions', () => {
     expect(undo.latest()).toBeUndefined();
   });
 
+  it('recent() follows pushes only, so undo never resurfaces an older entry', async () => {
+    const { id } = await store.capture(SEED);
+    await perform(store, undo, id, actions.addTag('a'));
+    await perform(store, undo, id, actions.complete());
+    const completed = undo.recent();
+    await undo.undo(store);
+    expect(undo.recent()).toBe(completed);
+    expect(undo.latest()?.label).toBe('Added #a');
+  });
+
   it('notifies subscribers when the stack changes', async () => {
     const { id } = await store.capture(SEED);
     let calls = 0;

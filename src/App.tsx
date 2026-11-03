@@ -3,6 +3,7 @@ import { useItems, useStore } from './app/StoreContext';
 import { useNow } from './app/useNow';
 import { requestPersistentStorage } from './store/persist';
 import { CaptureBar } from './ui/CaptureBar';
+import { UndoToast } from './ui/UndoToast';
 import { View, VIEWS, type ViewName } from './ui/Views';
 
 const VIEW_KEY = 'capture.view';
@@ -74,6 +75,8 @@ export function App() {
       <main className="pt-1">
         {items === undefined ? null : <View name={view} items={items} clock={clock} />}
       </main>
+
+      <UndoToast />
     </div>
   );
 }

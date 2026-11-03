@@ -205,6 +205,7 @@ Undo restores, it never inverts:
 - `revert()` runs in a transaction and only proceeds if the item is still exactly `after` (structural equality). If anything changed since, in this tab or another, the undo is refused and nothing is overwritten.
 - An entry leaves the stack before any await, so a double-clicked undo can't apply the same entry twice.
 - Actions that change nothing aren't recorded.
+- The toast shows each newly recorded action for 6 seconds. It follows the most recently *recorded* action, so undoing one never brings back the toast of an older action.
 
 **Tests.** `src/store/actions.test.ts`: every action followed by undo is compared to the exact previous record and search results; plus reverse-order undos, a double-clicked undo, an undo racing a new action, undoing an older change after a newer one (refused), and an item deleted underneath. Removing the "still exactly `after`" guard makes the safety tests fail.
 
