@@ -74,7 +74,8 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 **Parsing rules for the stored shape.**
 - A time-of-day the user stated ("3pm", "15:00") makes an instant. The wall time is converted with the zone's rules *for the target date*, so "tomorrow 9am" across a DST switch is still 9am.
 - A duration ("in 3 hours") is elapsed time from the reference instant, even across a DST switch.
-- An explicit zone keeps what was typed. Specific abbreviations and offsets (`EST`, `PDT`, `UTC`, `GMT+3`) are stored as that fixed offset with its label, so `5pm EST` in July is still UTC-5. Generic US labels (`ET`, `CT`, `MT`, `PT`) name a region, so they map to its IANA zone and follow its DST.
+- Only chrono's `result/relativeDateAndTime` tag (pure time-unit durations: "in 3 hours", "2 hours from now", "in an hour") counts as elapsed time. Day-level relatives with a clock time ("in 2 days at 9am", "next week 5pm") are wall-clock times and go through the zone rules.
+- An explicit zone takes precedence over everything except a pure duration, and keeps what was typed. Specific abbreviations and offsets (`EST`, `PDT`, `UTC`, `GMT+3`) are stored as that fixed offset with its label, so `5pm EST` in July is still UTC-5. Generic US labels (`ET`, `CT`, `MT`, `PT`) name a region, so they map to its IANA zone and follow its DST.
 - Vague times of day ("tonight", "monday morning") stay all-day dates.
 - "now" is not treated as a due date.
 - Numeric dates are read US-style (`3/4` = March 4) until locale settings exist.
@@ -86,6 +87,13 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 
 **Decision.** The parser exports an integer `PARSER_VERSION`, stored on each item as `parserVersion`. Bump it whenever parsing behavior changes.
 **Consequences.** We can identify items parsed by older logic and optionally re-parse them (subject to #6, #7, #13). Parser changes must ship with updated test cases.
+
+**Schema changes are separate from parser changes.** Re-parsing never touches user-owned values, so a change to the *shape* of stored data can't rely on it. Shape changes go through `upgradeShape()` (`src/model/migrate.ts`), applied by a new Dexie version's upgrade function for stored data and by backup import for old files. A change can need both: parser v2 below.
+
+| Parser version | Change |
+|---|---|
+| 1 | Initial parser. |
+| 2 | Timed due dates record their `zone` (was `tz`); explicit zones beat day-level relatives (`in 2 days at 9am PST`); day-level relatives with a clock time use wall-clock rules. Dexie schema v2 migrates the `tz` → `zone` shape for parsed and user-owned values. |
 
 ## 9. Sync-ready identifiers and timestamps — Accepted
 
@@ -161,7 +169,13 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 - Time comes from an injected clock, so tests control it.
 - The schema has a `meta` table for small app facts (e.g. `lastExportAt` for the backup hint in #4). Dexie version blocks are never edited, only added.
 
-**Backup** (`src/store/backup.ts`): JSON `{ format: 'claudegpt-backup', version: 1, exportedAt, items }`, including soft-deleted items so a restore is faithful. Import merges per item with last-write-wins on `updatedAt` (the same rule future sync will use); new items keep `capturedAt` and get `createdAt` = now; items from older parsers are upgraded; malformed entries are counted and skipped; non-backups and backups from a newer app version are rejected. Markdown export comes with the UI.
+**Backup** (`src/store/backup.ts`): JSON `{ format: 'claudegpt-backup', version: 1, exportedAt, items }`, including soft-deleted items so a restore is faithful. `backup.ts` only reads and checks files; the writes (`importItems`, `recordExport`) are `ItemStore` methods, so the store stays the only writer.
+- Each entry goes through: `upgradeShape()` → `isValidItem()` (full nested check: refs, timezones, fields and provenance, due/zone shapes, tags, spans within the text, statuses, finite timestamps) → re-parse if from an older parser → validated again. Any failure, including an exception, counts the entry as invalid and skips it; it never reaches the database or aborts the import.
+- Merge is per item, last-write-wins on `updatedAt` (the same rule future sync will use). New items keep `capturedAt` and get `createdAt` = now; replaced ones keep the local `createdAt`.
+- Non-backups and backups from a newer app version are rejected outright.
+- The envelope `version` changes only if the envelope changes; item shape changes are handled by `upgradeShape()`, so old files stay importable.
+
+Markdown export comes with the UI.
 
 **Known limitation.** The index is per tab. If the app is open in two tabs, writes in one reach the other's database (and Dexie `liveQuery` views) but not its search index until reload. Fix when the UI exists, via Dexie's cross-tab change events.
 

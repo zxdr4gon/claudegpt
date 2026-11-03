@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PARSER_VERSION } from '../parser/parse';
 import { activeTags, type Item } from './item';
 import {
   addTag,
@@ -39,7 +40,7 @@ describe('capture', () => {
       capturedAt: MON.now,
       createdAt: MON.now,
       updatedAt: MON.now,
-      parserVersion: 1,
+      parserVersion: PARSER_VERSION,
       status: 'open',
     });
     expect(spanTexts(item)).toEqual(['due:tomorrow', 'tag:#health', 'priority:!!']);

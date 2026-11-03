@@ -101,4 +101,50 @@ export class ItemStore {
     const cutoff = this.clock().now - DELETE_RETENTION_MS;
     return this.db.items.where('deletedAt').below(cutoff).delete();
   }
+
+  // --- Backup support ----------------------------------------------------------
+  // The file format lives in backup.ts; the writes live here.
+
+  /** Every item, soft-deleted ones included. */
+  exportItems(): Promise<Item[]> {
+    return this.db.items.toArray();
+  }
+
+  async recordExport(at: number): Promise<void> {
+    await this.db.meta.put({ key: LAST_EXPORT_KEY, value: at });
+  }
+
+  async lastExportAt(): Promise<number | undefined> {
+    const row = await this.db.meta.get(LAST_EXPORT_KEY);
+    return typeof row?.value === 'number' ? row.value : undefined;
+  }
+
+  /**
+   * Merge already-validated, current-schema items. Per item, the newer
+   * `updatedAt` wins (the rule future sync will use). New items keep
+   * `capturedAt` and get `createdAt` = now; replaced ones keep the local
+   * `createdAt` (DECISIONS #9).
+   */
+  async importItems(items: Item[]): Promise<{ added: number; updated: number; unchanged: number }> {
+    const now = this.clock().now;
+    const result = { added: 0, updated: 0, unchanged: 0 };
+    await this.db.transaction('rw', this.db.items, async () => {
+      for (const incoming of items) {
+        const existing = await this.db.items.get(incoming.id);
+        if (!existing) {
+          await this.db.items.add({ ...incoming, createdAt: now });
+          result.added++;
+        } else if (incoming.updatedAt > existing.updatedAt) {
+          await this.db.items.put({ ...incoming, createdAt: existing.createdAt });
+          result.updated++;
+        } else {
+          result.unchanged++;
+        }
+      }
+    });
+    await this.rebuildIndex();
+    return result;
+  }
 }
+
+const LAST_EXPORT_KEY = 'lastExportAt';

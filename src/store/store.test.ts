@@ -1,10 +1,11 @@
 import 'fake-indexeddb/auto';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type CaptureDb } from '../db';
 import type { Item } from '../model/item';
 import { addTag, removeTag, setDue, type Clock } from '../model/items';
 import { PARSER_VERSION } from '../parser/parse';
-import { BackupFormatError, exportBackup, importBackup, lastExportAt } from './backup';
+import { BackupFormatError, exportBackup, importBackup } from './backup';
 import { DELETE_RETENTION_MS, ItemNotFoundError, ItemStore } from './store';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -207,7 +208,7 @@ describe('backup', () => {
     try {
       now += DAY;
       const other = await openStore(otherDb);
-      expect(await importBackup(other, JSON.parse(JSON.stringify(backup)), now)).toEqual({
+      expect(await importBackup(other, JSON.parse(JSON.stringify(backup)))).toEqual({
         added: 2,
         updated: 0,
         unchanged: 0,
@@ -234,7 +235,7 @@ describe('backup', () => {
     await store.editText(id, 'final');
 
     // The backup is older than the local edit: local wins.
-    expect(await importBackup(store, backup, now)).toMatchObject({ updated: 0, unchanged: 1 });
+    expect(await importBackup(store, backup)).toMatchObject({ updated: 0, unchanged: 1 });
     expect((await store.get(id))?.text).toBe('final');
 
     // A backup newer than local wins, keeping the local createdAt.
@@ -242,7 +243,7 @@ describe('backup', () => {
     await store.editText(id, 'local again'); // same timestamp as `newer` items: not newer
     now += DAY;
     const edited = { ...newer, items: newer.items.map((i) => ({ ...i, text: 'from backup', updatedAt: now })) };
-    expect(await importBackup(store, edited, now)).toMatchObject({ updated: 1 });
+    expect(await importBackup(store, edited)).toMatchObject({ updated: 1 });
     expect((await store.get(id))?.text).toBe('from backup');
     expect((await store.get(id))?.createdAt).toBe(START);
     expect(texts(await store.search('backup'))).toEqual(['from backup']);
@@ -251,18 +252,18 @@ describe('backup', () => {
   it('counts invalid entries and rejects non-backups', async () => {
     const store = await openStore();
     const backup = await exportBackup(store, now);
-    expect(await importBackup(store, { ...backup, items: [{ id: 'x' }, 42, null] }, now)).toMatchObject({
+    expect(await importBackup(store, { ...backup, items: [{ id: 'x' }, 42, null] })).toMatchObject({
       invalid: 3,
     });
-    await expect(importBackup(store, { hello: 'world' }, now)).rejects.toBeInstanceOf(BackupFormatError);
-    await expect(importBackup(store, { ...backup, version: 99 }, now)).rejects.toThrow(/newer version/);
+    await expect(importBackup(store, { hello: 'world' })).rejects.toBeInstanceOf(BackupFormatError);
+    await expect(importBackup(store, { ...backup, version: 99 })).rejects.toThrow(/newer version/);
   });
 
   it('records when the last export happened', async () => {
     const store = await openStore();
-    expect(await lastExportAt(store)).toBeUndefined();
+    expect(await store.lastExportAt()).toBeUndefined();
     await exportBackup(store, now);
-    expect(await lastExportAt(store)).toBe(START);
+    expect(await store.lastExportAt()).toBe(START);
   });
 
   it('upgrades items from older parsers on import', async () => {
@@ -271,7 +272,84 @@ describe('backup', () => {
     const backup = await exportBackup(store, now);
     await db.items.clear();
     const old = { ...backup, items: [{ ...item, parserVersion: 0 }] };
-    await importBackup(store, old, now);
+    await importBackup(store, old);
     expect((await store.get(item.id))?.parserVersion).toBe(PARSER_VERSION);
   });
+});
+
+describe('legacy data (v1 timed due dates stored `tz` instead of `zone`)', () => {
+  const NY_ZONE = { type: 'iana', tz: 'America/New_York' } as const;
+
+  /** Rewrite a current item's timed due date into the v1 shape, as parser v1 wrote it. */
+  function toLegacy(item: Item): Record<string, unknown> {
+    const v = item.due!.value as { at: number; zone: { tz: string } };
+    return { ...item, parserVersion: 1, due: { ...item.due, value: { type: 'instant', at: v.at, tz: v.zone.tz } } };
+  }
+
+  async function legacyItems() {
+    const store = await openStore();
+    const parsed = await store.capture('call mom tomorrow 3pm');
+    const user = await store.update((await store.capture('flight')).id, (i, c) =>
+      setDue(i, { type: 'instant', at: Date.UTC(2026, 11, 24, 15), zone: NY_ZONE }, c),
+    );
+    return { parsed, user };
+  }
+
+  it('migrates parsed and user-owned due dates when the database opens', async () => {
+    const { parsed, user } = await legacyItems();
+    const name = db.name;
+    await db.delete(); // start over from a genuine v1 database
+
+    // Write v1-shaped records through a raw v1 schema, as the old app would have.
+    const v1 = new Dexie(name);
+    v1.version(1).stores({ items: 'id, status, capturedAt, updatedAt, deletedAt, parserVersion', meta: 'key' });
+    await v1.table('items').bulkPut([toLegacy(parsed), toLegacy(user)]);
+    v1.close();
+
+    db = openDb(name);
+    await openStore();
+    const [p, u] = await db.items.bulkGet([parsed.id, user.id]);
+    expect(p).toEqual(parsed); // shape migrated, then re-parsed by parser v2 to the same values
+    expect(u?.due).toEqual(user.due); // user-owned: migrated by shape, untouched by reparse
+    expect(u?.parserVersion).toBe(PARSER_VERSION);
+  });
+
+  it('migrates legacy items in an old backup', async () => {
+    const { parsed, user } = await legacyItems();
+    await db.items.clear();
+    const store = await openStore();
+    const old = {
+      format: 'claudegpt-backup',
+      version: 1,
+      exportedAt: now,
+      items: [toLegacy(parsed), toLegacy(user)],
+    };
+    expect(await importBackup(store, JSON.parse(JSON.stringify(old)))).toMatchObject({ added: 2, invalid: 0 });
+    expect((await store.get(parsed.id))?.due).toEqual(parsed.due);
+    expect((await store.get(user.id))?.due).toEqual(user.due);
+  });
+
+  it('skips malformed nested entries without poisoning the database', async () => {
+    const store = await openStore();
+    const good = await store.capture('good one #a');
+    await db.items.clear();
+    const bad = [
+      { ...good, id: 'b1', textRef: null },
+      { ...good, id: 'b2', kind: { value: 'event', source: 'parsed' } },
+      { ...good, id: 'b3', tags: [null] },
+      { ...good, id: 'b4', due: { value: { type: 'instant', at: 1, zone: { type: 'iana', tz: 'Mars/Base' } }, source: 'user' } },
+      { ...good, id: 'b5', parserVersion: 0, textRef: { at: 1, tz: 'Not/AZone' } }, // would crash reparse
+      { ...good, id: 'b6', spans: [{ start: 0, end: 999, field: 'tag' }] },
+    ];
+    const result = await importBackup(store, {
+      format: 'claudegpt-backup',
+      version: 1,
+      exportedAt: now,
+      items: [...bad, good],
+    });
+    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: bad.length });
+    expect((await db.items.toArray()).map((i) => i.id)).toEqual([good.id]);
+    expect(texts(await store.search('good'))).toEqual(['good one #a']);
+  });
+
 });

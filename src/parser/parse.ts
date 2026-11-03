@@ -5,8 +5,11 @@ import * as chrono from 'chrono-node';
 import type { Due, Kind, ParseRef, Priority } from '../model/item';
 import { formatDate, offsetMinutes, wallClock, zonedWallToInstant } from './time';
 
-/** Bump whenever parsing behaviour changes (DECISIONS #8). */
-export const PARSER_VERSION = 1;
+/**
+ * Bump whenever parsing behaviour changes (DECISIONS #8).
+ * 2: timed due dates record their zone; explicit zones beat day-level relatives.
+ */
+export const PARSER_VERSION = 2;
 
 export type Range = { start: number; end: number };
 
@@ -84,14 +87,15 @@ function toDue(result: chrono.ParsedResult, ref: ParseRef): Due {
   const c = result.start;
   const here = { type: 'iana', tz: ref.tz } as const;
 
-  // A duration ("in 3 hours") is elapsed time from the reference instant;
-  // chrono's arithmetic on instants is exactly that.
-  if (result.tags().has('result/relativeDate') && c.isCertain('hour')) {
-    return { type: 'instant', at: c.date().getTime(), zone: here };
-  }
+  // chrono tags pure time-unit durations ("in 3 hours", "2 hours from now")
+  // with relativeDateAndTime. Day-level relatives with a clock time ("in 2
+  // days at 9am", "next week 5pm EST") only get relativeDate and are not
+  // elapsed time, so they fall through to the zone/wall-clock branches.
+  const elapsed = result.tags().has('result/relativeDateAndTime');
 
-  // An explicit zone ("5pm EST", "noon ET").
-  if (c.isCertain('timezoneOffset')) {
+  // An explicit zone ("5pm EST", "noon ET"). chrono also marks the offset
+  // certain for durations, so those are excluded here.
+  if (!elapsed && c.isCertain('timezoneOffset')) {
     const minutes = c.get('timezoneOffset')!;
     const label = (ZONE_LABEL_RE.exec(result.text)?.[1] ?? '').replace(/\s+/gu, '').toUpperCase();
     const named = NAMED_ZONES[label];
@@ -101,6 +105,12 @@ function toDue(result: chrono.ParsedResult, ref: ParseRef): Due {
       return { type: 'instant', at: zonedWallToInstant(wall, named), zone: { type: 'iana', tz: named } };
     }
     return { type: 'instant', at: c.date().getTime(), zone: { type: 'offset', minutes, label } };
+  }
+
+  // A duration is elapsed time from the reference instant; chrono's
+  // arithmetic on instants is exactly that, even across DST.
+  if (elapsed) {
+    return { type: 'instant', at: c.date().getTime(), zone: here };
   }
 
   const year = c.get('year')!;

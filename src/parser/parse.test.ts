@@ -51,6 +51,9 @@ describe('dates', () => {
       ['numeric offset', 'call 5pm GMT+3', DHAKA, fixed(utc(2026, 11, 3, 14), 180, 'GMT+3')],
       // "tomorrow" is relative to the user's own day (Wed 4 Nov in Dhaka).
       ['with a relative day', 'tomorrow 9am PST', DHAKA, fixed(utc(2026, 11, 4, 17), -480, 'PST')],
+      // chrono tags these "relativeDate"; they must not be mistaken for durations.
+      ['with a day-level duration', 'in 2 days at 9am PST', DHAKA, fixed(utc(2026, 11, 5, 17), -480, 'PST')],
+      ['with "next week"', 'next week 5pm EST', DHAKA, fixed(utc(2026, 11, 10, 22), -300, 'EST')],
       // EST is a fixed -5 even in July, because that's what was typed.
       [
         'fixed abbreviation in summer stays fixed',
@@ -89,6 +92,12 @@ describe('dates', () => {
       ['wall clock across fall-back', 'tomorrow 9am', { at: utc(2026, 10, 31, 16), tz: NY }, instant(utc(2026, 11, 1, 14), NY)],
       // Captured Sat 7 Mar 12:00 EST; Sunday 9am is EDT (-4) = 13:00Z.
       ['wall clock across spring-forward', 'tomorrow 9am', { at: utc(2026, 3, 7, 17), tz: NY }, instant(utc(2026, 3, 8, 13), NY)],
+      // A day-level duration with a clock time is wall time, not elapsed time.
+      // Captured Fri 30 Oct 12:00 EDT; Sunday 9am is EST = 14:00Z (elapsed-time
+      // arithmetic would wrongly give 13:00Z).
+      ['day-level duration + time is wall clock', 'in 2 days at 9am', { at: utc(2026, 10, 30, 16), tz: NY }, instant(utc(2026, 11, 1, 14), NY)],
+      ['"from now" duration is elapsed', '2 hours from now', { at: utc(2026, 11, 1, 4, 30), tz: NY }, instant(utc(2026, 11, 1, 6, 30), NY)],
+      ['"an hour" duration is elapsed', 'in an hour', { at: utc(2026, 11, 1, 4, 30), tz: NY }, instant(utc(2026, 11, 1, 5, 30), NY)],
     ])('%s: %j', (_name, text, ref, expected) => {
       expect(parseText(text, ref).dates[0]?.due).toEqual(expected);
     });
