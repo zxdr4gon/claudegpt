@@ -3,7 +3,7 @@
 
 import * as chrono from 'chrono-node';
 import type { Due, Kind, ParseRef, Priority } from '../model/item';
-import { formatDate, offsetMinutes, zonedWallToInstant } from './time';
+import { formatDate, offsetMinutes, wallClock, zonedWallToInstant } from './time';
 
 /** Bump whenever parsing behaviour changes (DECISIONS #8). */
 export const PARSER_VERSION = 1;
@@ -70,24 +70,51 @@ function findPriority(text: string): PriorityMatch | undefined {
   return { start: m.index, end: m.index + m[1]!.length, value: m[1]!.length as Priority };
 }
 
+// Generic labels name a region whose offset depends on DST, so they map to a
+// real zone. Specific ones ("EST", "PDT", "GMT+3") stay the fixed offset typed.
+const NAMED_ZONES: Record<string, string> = {
+  ET: 'America/New_York',
+  CT: 'America/Chicago',
+  MT: 'America/Denver',
+  PT: 'America/Los_Angeles',
+};
+const ZONE_LABEL_RE = /([a-z]{1,5}(?:\s*[+-]\s*\d{1,2}(?::?\d{2})?)?)\s*$/iu;
+
 function toDue(result: chrono.ParsedResult, ref: ParseRef): Due {
   const c = result.start;
-  // An explicit zone ("5pm EST") or a pure duration ("in 3 hours") is already
-  // an exact instant; chrono's arithmetic is correct for those.
-  if (c.isCertain('timezoneOffset')) {
-    return { type: 'instant', at: c.date().getTime(), tz: ref.tz };
+  const here = { type: 'iana', tz: ref.tz } as const;
+
+  // A duration ("in 3 hours") is elapsed time from the reference instant;
+  // chrono's arithmetic on instants is exactly that.
+  if (result.tags().has('result/relativeDate') && c.isCertain('hour')) {
+    return { type: 'instant', at: c.date().getTime(), zone: here };
   }
+
+  // An explicit zone ("5pm EST", "noon ET").
+  if (c.isCertain('timezoneOffset')) {
+    const minutes = c.get('timezoneOffset')!;
+    const label = (ZONE_LABEL_RE.exec(result.text)?.[1] ?? '').replace(/\s+/gu, '').toUpperCase();
+    const named = NAMED_ZONES[label];
+    if (named) {
+      // Re-read the wall time chrono parsed and apply the zone's real rules.
+      const wall = wallClock(c.date().getTime() + minutes * 60000, 'UTC');
+      return { type: 'instant', at: zonedWallToInstant(wall, named), zone: { type: 'iana', tz: named } };
+    }
+    return { type: 'instant', at: c.date().getTime(), zone: { type: 'offset', minutes, label } };
+  }
+
   const year = c.get('year')!;
   const month = c.get('month')!;
   const day = c.get('day')!;
   if (c.isCertain('hour')) {
-    // chrono reports wall-clock components in the reference offset. Convert
-    // them with the real zone rules for the target date, so DST is respected.
+    // A wall-clock time in the user's zone. chrono reports components in the
+    // reference offset; convert them with the zone's rules for the target
+    // date, so "tomorrow 9am" stays 9am across a DST switch.
     const at = zonedWallToInstant(
       { year, month, day, hour: c.get('hour')!, minute: c.get('minute') ?? 0, second: c.get('second') ?? 0 },
       ref.tz,
     );
-    return { type: 'instant', at, tz: ref.tz };
+    return { type: 'instant', at, zone: here };
   }
   return { type: 'date', date: formatDate(year, month, day) };
 }
@@ -121,6 +148,9 @@ export function parseText(text: string, ref: ParseRef): ParseResult {
 }
 
 // --- Kind inference ---------------------------------------------------------
+// Deliberately simple: a few fixed rules, in order. Kind is a cheap default the
+// user can change with one click, not natural-language classification. Prefer
+// leaving these rules alone over adding cases.
 
 const NOTE_PREFIX = /^\s*(idea|note|thought)s?\s*:/iu;
 const TASK_PREFIX = /^\s*(todo|task)\s*:/iu;

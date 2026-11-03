@@ -9,9 +9,14 @@ export type Field<T> = { value: T | null; source: Provenance };
 /** The moment and IANA zone relative expressions were resolved against (#7). */
 export type ParseRef = { at: number; tz: string };
 
+/** The zone a timed due date was expressed in. */
+export type Zone =
+  | { type: 'iana'; tz: string } // the user's zone, or a named zone like "ET"
+  | { type: 'offset'; minutes: number; label: string }; // explicit fixed zone, e.g. "EST" = -300
+
 export type Due =
   | { type: 'date'; date: string } // 'YYYY-MM-DD', floating calendar date
-  | { type: 'instant'; at: number; tz: string }; // epoch ms + IANA zone it was entered in
+  | { type: 'instant'; at: number; zone: Zone }; // epoch ms + the zone it was expressed in
 
 /** `ref` is present only on parsed values. */
 export type DueField = Field<Due> & { ref?: ParseRef };

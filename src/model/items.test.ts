@@ -97,7 +97,7 @@ describe('editing text: date resolution (DECISIONS #7)', () => {
   it('extending the date expression resolves from the edit time', () => {
     const item = editText(capture('dentist tomorrow'), 'dentist tomorrow 3pm', WED);
     // Thursday 5 Nov, 15:00 Dhaka.
-    expect(item.due?.value).toEqual({ type: 'instant', at: utc(2026, 11, 5, 9), tz: TZ });
+    expect(item.due?.value).toEqual({ type: 'instant', at: utc(2026, 11, 5, 9), zone: { type: 'iana', tz: TZ } });
   });
 
   it('retyping the same word inside it counts as a change', () => {

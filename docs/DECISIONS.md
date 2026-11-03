@@ -52,7 +52,7 @@ React + TypeScript + Vite + Tailwind (v3, see #15). Dexie over IndexedDB. MiniSe
 **Context.** "Tomorrow" means different things depending on when and where it was typed. Calendar dates and instants are different things and should be stored differently.
 **Decision.** Relative expressions are resolved to absolute values at parse time. `due` is one of two shapes:
 - **All-day:** `{ type: 'date', date: 'YYYY-MM-DD' }` — a floating calendar date. It shows on that date wherever the user is; no timezone conversion.
-- **Timed:** `{ type: 'instant', at: <epoch ms>, tz: <IANA> }` — an exact instant, displayed in the viewer's current timezone. `tz` records where it was entered (useful for display hints like "5pm Dhaka time" when travelling).
+- **Timed:** `{ type: 'instant', at: <epoch ms>, zone }` — an exact instant, displayed in the viewer's current timezone. `zone` records the zone the time was *expressed in*: `{ type: 'iana', tz }` for the user's own zone or a named region, or `{ type: 'offset', minutes, label }` for an explicit fixed zone such as `5pm EST`. The user's local zone is never claimed for a time they typed in another zone.
 
 Each parsed `due` also stores **`ref: { at, tz }`** — the timestamp and IANA timezone that relative expressions were resolved against. Re-parsing the same text with the same `ref` and parser version always produces the same result.
 
@@ -73,7 +73,8 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 
 **Parsing rules for the stored shape.**
 - A time-of-day the user stated ("3pm", "15:00") makes an instant. The wall time is converted with the zone's rules *for the target date*, so "tomorrow 9am" across a DST switch is still 9am.
-- An explicit zone ("5pm EST") or a duration ("in 3 hours") is an exact instant: elapsed time, not wall time.
+- A duration ("in 3 hours") is elapsed time from the reference instant, even across a DST switch.
+- An explicit zone keeps what was typed. Specific abbreviations and offsets (`EST`, `PDT`, `UTC`, `GMT+3`) are stored as that fixed offset with its label, so `5pm EST` in July is still UTC-5. Generic US labels (`ET`, `CT`, `MT`, `PT`) name a region, so they map to its IANA zone and follow its DST.
 - Vague times of day ("tonight", "monday morning") stay all-day dates.
 - "now" is not treated as a due date.
 - Numeric dates are read US-style (`3/4` = March 4) until locale settings exist.
@@ -157,9 +158,13 @@ type Field<T> = { value: T | null; source: Provenance };
 
 type ParseRef = { at: number; tz: string };   // reference for relative dates (#7)
 
+type Zone =
+  | { type: 'iana'; tz: string }                          // user's zone or a named region ("ET")
+  | { type: 'offset'; minutes: number; label: string };   // explicit fixed zone ("EST" = -300)
+
 type Due =
-  | { type: 'date'; date: string }              // 'YYYY-MM-DD', floating
-  | { type: 'instant'; at: number; tz: string }; // epoch ms + IANA zone of entry
+  | { type: 'date'; date: string }               // 'YYYY-MM-DD', floating
+  | { type: 'instant'; at: number; zone: Zone }; // epoch ms + the zone it was expressed in
 
 type Tag = { value: string; source: Provenance; dismissed?: boolean };
 

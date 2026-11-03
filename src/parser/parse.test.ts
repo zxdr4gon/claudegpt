@@ -8,7 +8,9 @@ const utc = (y: number, mo: number, d: number, h = 0, mi = 0) => Date.UTC(y, mo 
 const DHAKA: ParseRef = { at: utc(2026, 11, 3, 4), tz: 'Asia/Dhaka' };
 
 const date = (d: string): Due => ({ type: 'date', date: d });
-const instant = (at: number, tz: string): Due => ({ type: 'instant', at, tz });
+const instant = (at: number, tz: string): Due => ({ type: 'instant', at, zone: { type: 'iana', tz } });
+const fixed = (at: number, minutes: number, label: string): Due =>
+  ({ type: 'instant', at, zone: { type: 'offset', minutes, label } });
 
 describe('dates', () => {
   it.each<[string, string, ParseRef, Due]>([
@@ -19,7 +21,9 @@ describe('dates', () => {
     ['duration in days', 'renew passport in 2 weeks', DHAKA, date('2026-11-17')],
     ['month + day', 'gift for dec 3', DHAKA, date('2026-12-03')],
     ['casual time of day stays all-day', 'pack tonight', DHAKA, date('2026-11-03')],
-    ['explicit zone', 'call at 5pm EST', DHAKA, instant(utc(2026, 11, 3, 22), 'Asia/Dhaka')],
+    ['weekday + vague time of day stays all-day', 'review monday morning', DHAKA, date('2026-11-09')],
+    ['US-style numeric date, already past this year', 'file taxes 3/4', DHAKA, date('2027-03-04')],
+    ['US-style numeric date, later this year', 'party 12/25', DHAKA, date('2026-12-25')],
     [
       // 02:30 local on Nov 4 in Dhaka is still Nov 3 in UTC; "tomorrow" is Nov 5.
       'local date differs from UTC date',
@@ -34,22 +38,60 @@ describe('dates', () => {
       { at: utc(2026, 11, 4, 3), tz: 'America/New_York' },
       date('2026-11-04'),
     ],
-    [
-      // Captured Sat Oct 31 (EDT, -4). Sunday 9am is after the switch to EST (-5).
-      'wall time across DST uses the target date offset',
-      'tomorrow 9am',
-      { at: utc(2026, 10, 31, 16), tz: 'America/New_York' },
-      instant(utc(2026, 11, 1, 14), 'America/New_York'),
-    ],
-    [
-      // 00:30 EDT + 3h of elapsed time = 02:30 EST = 07:30Z.
-      'duration across DST is elapsed time',
-      'in 3 hours',
-      { at: utc(2026, 11, 1, 4, 30), tz: 'America/New_York' },
-      instant(utc(2026, 11, 1, 7, 30), 'America/New_York'),
-    ],
   ])('%s: %j', (_name, text, ref, expected) => {
     expect(parseText(text, ref).dates[0]?.due).toEqual(expected);
+  });
+
+  describe('explicit zones keep the zone that was typed, not the local one', () => {
+    it.each<[string, string, ParseRef, Due]>([
+      // Typed in Dhaka (+6); 5pm EST on Tue 3 Nov = 22:00Z.
+      ['fixed abbreviation', 'call at 5pm EST', DHAKA, fixed(utc(2026, 11, 3, 22), -300, 'EST')],
+      ['lowercase abbreviation', 'call at 5pm est', DHAKA, fixed(utc(2026, 11, 3, 22), -300, 'EST')],
+      ['UTC', 'deploy 17:00 UTC', DHAKA, fixed(utc(2026, 11, 3, 17), 0, 'UTC')],
+      ['numeric offset', 'call 5pm GMT+3', DHAKA, fixed(utc(2026, 11, 3, 14), 180, 'GMT+3')],
+      // "tomorrow" is relative to the user's own day (Wed 4 Nov in Dhaka).
+      ['with a relative day', 'tomorrow 9am PST', DHAKA, fixed(utc(2026, 11, 4, 17), -480, 'PST')],
+      // EST is a fixed -5 even in July, because that's what was typed.
+      [
+        'fixed abbreviation in summer stays fixed',
+        'call 5pm EST',
+        { at: utc(2026, 7, 1, 4), tz: 'Asia/Dhaka' },
+        fixed(utc(2026, 7, 1, 22), -300, 'EST'),
+      ],
+      // "ET" follows New York's DST: noon ET in July is EDT (-4) = 16:00Z.
+      [
+        'generic US label follows DST',
+        'standup noon ET',
+        { at: utc(2026, 7, 1, 4), tz: 'Asia/Dhaka' },
+        instant(utc(2026, 7, 1, 16), 'America/New_York'),
+      ],
+      [
+        'generic US label in winter',
+        'standup noon ET',
+        DHAKA,
+        instant(utc(2026, 11, 3, 17), 'America/New_York'),
+      ],
+    ])('%s: %j', (_name, text, ref, expected) => {
+      expect(parseText(text, ref).dates[0]?.due).toEqual(expected);
+    });
+  });
+
+  describe('DST: durations are elapsed time, wall-clock times follow the target date', () => {
+    const NY = 'America/New_York';
+    it.each<[string, string, ParseRef, Due]>([
+      // Fall back, Sun 1 Nov 2026 02:00 EDT → 01:00 EST.
+      // 00:30 EDT (04:30Z) + 3h elapsed = 07:30Z (02:30 EST), not 03:30 wall time.
+      ['duration across fall-back', 'in 3 hours', { at: utc(2026, 11, 1, 4, 30), tz: NY }, instant(utc(2026, 11, 1, 7, 30), NY)],
+      // Spring forward, Sun 8 Mar 2026 02:00 EST → 03:00 EDT.
+      // 00:30 EST (05:30Z) + 3h elapsed = 08:30Z (04:30 EDT).
+      ['duration across spring-forward', 'in 3 hours', { at: utc(2026, 3, 8, 5, 30), tz: NY }, instant(utc(2026, 3, 8, 8, 30), NY)],
+      // Captured Sat 31 Oct 12:00 EDT; Sunday 9am is EST (-5) = 14:00Z.
+      ['wall clock across fall-back', 'tomorrow 9am', { at: utc(2026, 10, 31, 16), tz: NY }, instant(utc(2026, 11, 1, 14), NY)],
+      // Captured Sat 7 Mar 12:00 EST; Sunday 9am is EDT (-4) = 13:00Z.
+      ['wall clock across spring-forward', 'tomorrow 9am', { at: utc(2026, 3, 7, 17), tz: NY }, instant(utc(2026, 3, 8, 13), NY)],
+    ])('%s: %j', (_name, text, ref, expected) => {
+      expect(parseText(text, ref).dates[0]?.due).toEqual(expected);
+    });
   });
 
   it('records the matched span and text', () => {
