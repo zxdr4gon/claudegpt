@@ -32,8 +32,14 @@ function formatTime(at: number, timeZone: string, locale?: string): string {
 }
 
 /**
- * e.g. "Tomorrow", "Fri, 15:00". A time typed in another zone shows that too,
- * so "5pm EST" read in Dhaka is "Wed, 04:00 (17:00 EST)".
+ * e.g. "Tomorrow", "Fri, 15:00".
+ *
+ * A timed due date also shows the time in the zone it was expressed in when
+ * that zone's clock reads differently from the viewer's at that moment:
+ * "5pm EST" viewed in Dhaka is "Tomorrow, 4:00 (17:00 EST)". When both clocks
+ * read the same (same zone, or a different zone on the same offset, e.g.
+ * Asia/Thimphu viewed from Asia/Dhaka) the hint would just repeat the time,
+ * so it is left out.
  */
 export function formatDue(due: Due, clock: Clock, locale?: string): string {
   const day = formatDay(dueDay(due, clock.tz), clock, locale);

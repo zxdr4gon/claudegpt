@@ -59,7 +59,7 @@ The text itself is always shown as written — syntax is highlighted, never hidd
 | View | Contents | Notes |
 |---|---|---|
 | **Inbox** | Open, unsnoozed items with no due date, captured in the last 7 days | A convenience, not an obligation. No count badge. Items quietly age out after 7 days (they remain in Everything and search). |
-| **Today** | Open items due today, plus an "Earlier" section for past-due open items | "Earlier" is collapsed and neutral-colored — no red, no counter shaming. Completed items leave immediately. |
+| **Today** | Open items due today (including times already passed today), plus an "Earlier" section for open items due on previous days | "Earlier" is collapsed and neutral-colored — no red, no counter shaming. Completed items leave immediately. |
 | **Upcoming** | Open items with future due dates, grouped by day | |
 | **Everything** | All non-archived items, newest first, with completed items in their own section | Filterable by kind and tag. Includes snoozed items. |
 | **Search** | Global, from anywhere (`/` or `Ctrl+K`), separate from capture | Results on every keystroke. |

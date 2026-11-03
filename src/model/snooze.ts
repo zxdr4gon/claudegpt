@@ -24,11 +24,13 @@ export function snoozeUntil(preset: SnoozePreset, clock: Clock): number {
   const today = dateIn(clock.now, clock.tz);
   switch (preset) {
     case 'laterToday': {
-      // Three hours from now, rounded up to the next full hour.
-      const w = wallClock(clock.now + 3 * HOUR, clock.tz);
-      const exact = w.minute === 0 && w.second === 0;
-      const at = zonedWallToInstant({ ...w, minute: 0, second: 0 }, clock.tz);
-      return exact ? at : at + HOUR;
+      // At least three elapsed hours from now, rounded up to the next full
+      // local hour. Rounding stays in instants: going back through wall time
+      // would be ambiguous in a repeated (fall-back) hour.
+      const threshold = clock.now + 3 * HOUR;
+      const w = wallClock(threshold, clock.tz);
+      const startOfHour = threshold - (threshold % 1000) - (w.minute * 60 + w.second) * 1000;
+      return startOfHour === threshold ? threshold : startOfHour + HOUR;
     }
     case 'tomorrow':
       return morningOf(addDays(today, 1), clock.tz);

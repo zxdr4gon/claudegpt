@@ -36,6 +36,22 @@ describe('formatDue', () => {
       'Today, 23:00 (12:00 GMT-5)', // en-GB's short name for New York in winter
     ],
     [
+      'same zone as the viewer: no hint',
+      { type: 'instant', at: utc(2026, 11, 4, 9), zone: { type: 'iana', tz: 'Asia/Dhaka' } },
+      'Tomorrow, 15:00',
+    ],
+    [
+      'fixed offset equal to the viewer offset: no hint',
+      { type: 'instant', at: utc(2026, 11, 4, 9), zone: { type: 'offset', minutes: 360, label: 'BST' } },
+      'Tomorrow, 15:00',
+    ],
+    [
+      // Same zone id as an earlier entry, but in summer New York is 10 h behind Dhaka, not 11.
+      'named zone, offset taken at the due instant',
+      { type: 'instant', at: utc(2026, 7, 1, 16), zone: { type: 'iana', tz: 'America/New_York' } },
+      'Wed 1 Jul, 22:00 (12:00 GMT-4)',
+    ],
+    [
       'entered elsewhere with the same offset: no hint',
       { type: 'instant', at: utc(2026, 11, 4, 9), zone: { type: 'iana', tz: 'Asia/Thimphu' } },
       'Tomorrow, 15:00',

@@ -41,9 +41,12 @@ export function inboxView(items: Item[], clock: Clock): Item[] {
 }
 
 export type TodayView = {
-  /** Due today, all-day first, then by time. */
+  /**
+   * Due today, all-day first, then by time — including timed items whose time
+   * today has already passed. They stay here until the day ends.
+   */
   today: Item[];
-  /** Past due and still open, oldest first. Shown collapsed and neutral. */
+  /** Open items due on previous days, oldest first. Shown collapsed and neutral. */
   earlier: Item[];
 };
 

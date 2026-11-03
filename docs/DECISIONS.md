@@ -126,7 +126,7 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 **Decision.**
 - No unread or item counts on Inbox or any view.
 - **Inbox** = items that are open, have no due date (a dismissed date counts as none), are not *actively* snoozed, and were captured within the last **7 days** (by `capturedAt`, not last edit). An item whose `snoozedUntil` has passed qualifies again automatically. Not configurable in MVP. Items age out automatically and remain in Everything and search.
-- Past-due tasks appear in a collapsed, neutral "Earlier" section of Today — no red, no counters.
+- Past-due tasks appear in a collapsed, neutral "Earlier" section of Today — no red, no counters. "Earlier" means **previous calendar days** (in the viewer's zone); a timed item whose time has passed earlier today stays in the main Today list until the day ends.
 - No streaks, no review prompts, no required fields beyond text.
 
 **Consequences.** Any future feature that adds badges, nags, or required organization must explicitly revisit this decision. Imported items with old `capturedAt` go straight to Everything, not Inbox — intended.
@@ -191,7 +191,8 @@ Markdown export comes with the UI.
 - **Global shortcuts** never fire while focus is in an input, textarea, select or contenteditable element, or while an IME composition is in progress.
 - **Undo really reverses.** Undo restores the item's exact previous record (and search entry), not an approximate inverse operation.
 - **Cross-tab.** Search indexes stay in sync across tabs without reloads.
-- **Snooze** is separate from due dates and never changes `capturedAt`. Presets: Later today, Tomorrow, Next week, Pick date/time (rules in `src/model/snooze.ts`).
+- **Snooze** is separate from due dates and never changes `capturedAt`. Presets: Later today (at least 3 elapsed hours, rounded up to the next full local hour; rounding is done on instants so a repeated fall-back hour can't shorten it), Tomorrow (09:00), Next week (coming Monday 09:00), Pick date/time. Rules in `src/model/snooze.ts`.
+- **Zone hint on timed due dates.** A timed due date shows the time in the zone it was expressed in only when that zone's clock reads differently from the viewer's at that moment ("Tomorrow, 4:00 (17:00 EST)" seen from Dhaka). Same zone, or a different zone on the same offset: no hint, since it would repeat the time.
 - **Snoozed items** are hidden from Inbox, Today and Upcoming while the snooze is active; they stay in Everything and search.
 - **Completed items** leave Today and Upcoming immediately; Everything shows them in a separate Completed section.
 
