@@ -22,3 +22,5 @@ npm run build
 - `src/store/` — the only writer: Dexie-backed `ItemStore` (`store.ts`), JSON backup (`backup.ts`), persistent-storage request (`persist.ts`)
 - `src/search/` — in-memory MiniSearch index (`index.ts`) and its 10k-item performance test
 - `src/db.ts` — Dexie schema
+- `src/app/` — React plumbing: store context, live queries, clock
+- `src/ui/` — capture bar, views, item rows, display formatting

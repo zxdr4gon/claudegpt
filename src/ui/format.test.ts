@@ -28,7 +28,7 @@ describe('formatDue', () => {
     [
       'explicit fixed zone shows what was typed',
       { type: 'instant', at: utc(2026, 11, 3, 22), zone: { type: 'offset', minutes: -300, label: 'EST' } },
-      'Tomorrow, 04:00 (17:00 EST)',
+      'Tomorrow, 4:00 (17:00 EST)',
     ],
     [
       'named zone different from the viewer',

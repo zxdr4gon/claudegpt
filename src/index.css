@@ -1,3 +1,62 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Colour tokens as RGB triples so Tailwind can apply opacity. */
+:root {
+  --paper: 245 247 250;
+  --raised: 255 255 255;
+  --ink: 30 40 51;
+  --muted: 104 117 133;
+  --rule: 220 226 233;
+  --focus: 46 91 230;
+  /* Highlighter marks for detected syntax, one colour per field. */
+  --mark-due: 207 226 255;
+  --mark-tag: 255 239 160;
+  --mark-priority: 255 212 222;
+  --mark-url: 201 238 221;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: 26 32 41;
+    --raised: 34 41 52;
+    --ink: 226 232 240;
+    --muted: 148 160 176;
+    --rule: 52 62 76;
+    --focus: 125 157 255;
+    --mark-due: 52 84 140;
+    --mark-tag: 112 96 30;
+    --mark-priority: 120 50 70;
+    --mark-url: 34 96 72;
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+}
+
+body {
+  font-family: theme('fontFamily.sans');
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Highlighter strokes: a soft band behind the lower part of the text. */
+.mark {
+  border-radius: 0.2em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

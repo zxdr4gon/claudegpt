@@ -28,7 +28,7 @@ export function formatDay(day: string, clock: Clock, locale?: string): string {
 }
 
 function formatTime(at: number, timeZone: string, locale?: string): string {
-  return new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone });
+  return new Date(at).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit', timeZone });
 }
 
 /**
@@ -43,7 +43,7 @@ export function formatDue(due: Due, clock: Clock, locale?: string): string {
   if (zone.type === 'offset') {
     // Show the wall time in the fixed offset that was typed.
     const shifted = new Date(due.at + zone.minutes * 60_000);
-    const there = shifted.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    const there = shifted.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
     return zone.minutes === offsetMinutes(clock.tz, due.at) ? local : `${local} (${there} ${zone.label})`;
   }
   if (zone.tz !== clock.tz && offsetMinutes(zone.tz, due.at) !== offsetMinutes(clock.tz, due.at)) {
