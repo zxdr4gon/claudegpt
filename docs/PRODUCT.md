@@ -73,7 +73,7 @@ Snoozed items are hidden from Inbox, Today and Upcoming until the snooze ends. S
 - Edit, complete, snooze, archive, delete (soft delete with undo)
 - Instant full-text, fuzzy search across text, tags, and URLs
 - Keyboard-first operation; usable on mobile
-- Installable PWA, fully offline
+- Installable PWA, fully offline (updates wait for the user to reload)
 - JSON export and import (plus Markdown export)
 - Persistent-storage request and visible backup/export affordance
 

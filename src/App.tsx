@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useItems, useStore, useUndoStack } from './app/StoreContext';
 import { handleShortcut, type Command } from './app/shortcuts';
 import { useNow } from './app/useNow';
-import { requestPersistentStorage } from './store/persist';
+import { requestPersistenceOnce, usePersistence } from './app/usePersistence';
 import { BackupPanel } from './ui/BackupPanel';
 import { CAPTURE_INPUT_ID, CaptureBar } from './ui/CaptureBar';
 import { SearchPanel } from './ui/SearchPanel';
 import { UndoToast } from './ui/UndoToast';
+import { UpdateBanner } from './ui/UpdateBanner';
 import { View, VIEWS, type ViewName } from './ui/Views';
 
 const VIEW_KEY = 'capture.view';
@@ -58,7 +59,7 @@ export function App() {
   const [view, setView] = useState<ViewName>(initialView);
   const [searching, setSearching] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
-  const askedPersistence = useRef(false);
+  const persistence = usePersistence();
   const searchButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -116,11 +117,8 @@ export function App() {
     async (text: string) => {
       const store = await ready;
       await store.capture(text);
-      // After the first capture, never before and never awaited (DECISIONS #17).
-      if (!askedPersistence.current) {
-        askedPersistence.current = true;
-        void requestPersistentStorage().catch(() => undefined);
-      }
+      // After the first capture, never before and never awaited (DECISIONS #17, #23).
+      requestPersistenceOnce();
     },
     [ready],
   );
@@ -178,6 +176,8 @@ export function App() {
         </button>
       </nav>
 
+      <UpdateBanner />
+
       <main className="pt-1">
         {items === undefined ? null : backingUp ? (
           <BackupPanel clock={clock} onClose={() => setBackingUp(false)} />
@@ -188,7 +188,13 @@ export function App() {
         )}
       </main>
 
-      <footer className="mt-auto pt-16">
+      <footer className="mt-auto flex flex-col gap-1 pt-16">
+        {(persistence === 'denied' || persistence === 'unsupported') && (
+          // Quiet and non-blocking: a fact, not a warning dialog.
+          <p className="max-w-prose text-[14px] leading-6 text-muted">
+            This browser may clear your data if it runs low on space. Exporting a backup now and then keeps it safe.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -196,7 +202,7 @@ export function App() {
             setBackingUp(true);
             window.scrollTo({ top: 0 });
           }}
-          className="text-[14px] text-muted underline-offset-2 hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+          className="w-fit text-[14px] text-muted underline-offset-2 hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
         >
           Backup and restore
         </button>

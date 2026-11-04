@@ -13,6 +13,8 @@ npm run dev        # Vite dev server
 npm test           # Vitest (runs under TZ=Pacific/Chatham)
 npm run typecheck
 npm run build
+npm run preview    # serve the production build (service worker, offline)
+node scripts/make-icons.mjs   # regenerate the app icons in public/
 ```
 
 ## Layout

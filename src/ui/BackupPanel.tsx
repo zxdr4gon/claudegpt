@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useOpenStore } from '../app/StoreContext';
+import { usePersistence } from '../app/usePersistence';
+import type { PersistState } from '../store/persist';
 import type { Clock } from '../model/items';
 import { dateIn } from '../parser/time';
 import {
@@ -21,6 +23,14 @@ type Pending = { fileName: string; data: unknown; preview: ImportPreview; refres
 function plural(n: number, one: string, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+/** Honest about what the browser has and hasn't promised (DECISIONS #23). */
+const PERSIST_TEXT: Record<PersistState, string | null> = {
+  granted: 'This browser has agreed not to clear your data on its own. Clearing site data still removes it.',
+  denied: 'This browser may clear your data if it runs low on space.',
+  unsupported: 'This browser can’t promise to keep your data.',
+  'not-asked': null,
+};
 
 /** One sentence per count that isn't zero. */
 function describeResult(r: ImportResult, future: boolean): string[] {
@@ -61,6 +71,7 @@ const primaryClass =
  */
 export function BackupPanel({ clock, onClose }: { clock: Clock; onClose: () => void }) {
   const store = useOpenStore();
+  const persistence = usePersistence();
   const [lastExport, setLastExport] = useState<number | undefined>();
   const [pending, setPending] = useState<Pending | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; lines: string[] } | null>(null);
@@ -156,6 +167,7 @@ export function BackupPanel({ clock, onClose }: { clock: Clock; onClose: () => v
         <h3 className="font-semibold">Export</h3>
         <p className="max-w-prose text-[15px] leading-6 text-muted">
           Everything lives only in this browser. A backup file is how you keep it safe or move it to another browser.{' '}
+          {persistence && PERSIST_TEXT[persistence] && `${PERSIST_TEXT[persistence]} `}
           {lastExportText}
         </p>
         <div>

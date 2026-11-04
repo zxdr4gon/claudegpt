@@ -286,6 +286,31 @@ The backup is the user's escape hatch, so the rules come first and are tested in
 
 **Not yet:** Markdown export, and the gentle "no recent backup" hint from #4.
 
+## 23. Installable PWA and persistent storage — Accepted
+
+**Scope.** Installability and offline launch only. No accounts, sync or notifications.
+
+**Service worker** (`vite-plugin-pwa`, Workbox `generateSW`; config in `vite.config.ts`):
+- Precaches only the built app: HTML, JS, CSS, fonts, icons and the manifest. No runtime caching; the app makes no network requests for data.
+- Item data lives in IndexedDB and is never cached or served by the service worker. IndexedDB stays the only source of truth.
+- `navigateFallback: index.html`, so the app opens offline from any path.
+- **Updates wait for the user.** `registerType: 'prompt'`: a new version installs in the background and a quiet banner offers "Reload to update" or "Later". It never reloads by itself, because that could throw away text being typed. `cleanupOutdatedCaches` removes old app versions.
+
+**Manifest.** Name "Capture", standalone display, 192/512 icons plus a 512 maskable icon. Icons are drawn by `scripts/make-icons.mjs` (Node's zlib only, no image dependencies), so they can be regenerated from the repo.
+
+**Persistent storage** (`src/store/persist.ts`, `src/app/usePersistence.ts`):
+- Requested once, after the first capture, fire-and-forget: capture never waits for it, and it never throws.
+- State is `granted`, `denied`, `not-asked` or `unsupported`. A local flag records that we asked, so after a reload "not persisted" reads as denied rather than not asked.
+- If denied or unsupported, a quiet line in the footer says the browser may clear the data when space runs low and suggests exporting a backup now and then. Nothing blocks or pops up.
+- The backup panel states the status honestly. Even when granted it says clearing site data still removes the data; it never says storage is guaranteed.
+
+**Verified against the production build** (`vite preview`):
+- *First install*: the service worker activated and precached 12 files (app shell, assets, icons, manifest), with nothing from IndexedDB. The manifest was valid. The first capture triggered the storage request; this browser denied it, and the footer note appeared only then.
+- *Offline*: with the server stopped (confirmed unreachable), a reload opened the app from the service worker with its data. Capture, inline edit, typo search, export and import (with preview) all worked.
+- *Update with existing data*: after a rebuild with a marked change, reloading showed the banner while the old version kept running. "Reload to update" switched to the new version with all items intact and searchable.
+
+**Known.** `npm audit` reports moderate advisories in Workbox's build-time dependency chain (`minimatch` via `ejs`/`jake`). They don't ship to the browser, and the suggested fix downgrades the plugin, so they're left for now.
+
 ---
 
 ## Item schema
