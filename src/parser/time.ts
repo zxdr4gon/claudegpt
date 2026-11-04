@@ -96,6 +96,42 @@ export function dateIn(at: number, tz: string): string {
   return formatDate(w.year, w.month, w.day);
 }
 
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
+const TIME_RE = /^(\d{2}):(\d{2})$/u;
+
+/** A real calendar date in 'YYYY-MM-DD' form (rejects e.g. 2026-02-31, month 13). */
+export function isCalendarDate(x: unknown): x is string {
+  if (typeof x !== 'string') return false;
+  const m = DATE_RE.exec(x);
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
+/** 'HH:mm' on a 24-hour clock (rejects hour 24+, minute 60+), as [hour, minute]. */
+export function parseClockTime(x: string): [number, number] | null {
+  const m = TIME_RE.exec(x);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  return hour <= 23 && minute <= 59 ? [hour, minute] : null;
+}
+
+/**
+ * A validated local date and time in `tz` as an instant, or null if either
+ * part doesn't exist on the calendar or clock. Never lets Date normalise an
+ * impossible value (Feb 31, hour 25) into a different one. DST follows
+ * zonedWallToInstant: gap times shift forward, repeated times take the earlier.
+ */
+export function localToInstant(date: string, time: string, tz: string): number | null {
+  if (!isCalendarDate(date)) return null;
+  const t = parseClockTime(time);
+  if (!t) return null;
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  return zonedWallToInstant({ year, month, day, hour: t[0], minute: t[1], second: 0 }, tz);
+}
+
 export function currentTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }

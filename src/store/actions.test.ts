@@ -207,7 +207,36 @@ describe('snoozeAtLocal (Pick date/time)', () => {
   it('reads the value in the viewer zone', () => {
     expect(snoozeAtLocal('2026-11-03T09:30', c)).toBe(Date.UTC(2026, 10, 3, 3, 30));
   });
-  it.each(['2026-11-02T09:00', '', 'tomorrow', '2026-11-03 09:30'])('rejects %j (past or malformed)', (v) => {
+  it.each([
+    ['in the past', '2026-11-02T09:00'],
+    ['empty', ''],
+    ['words', 'tomorrow'],
+    ['space instead of T', '2026-11-03 09:30'],
+    ['February 31', '2027-02-31T10:00'],
+    ['February 29 in a common year', '2027-02-29T10:00'],
+    ['month 13', '2027-13-01T10:00'],
+    ['day 0', '2027-01-00T10:00'],
+    ['hour 24', '2026-12-01T24:00'],
+    ['hour 25', '2026-12-01T25:00'],
+    ['minute 60', '2026-12-01T10:60'],
+    ['seconds included', '2026-12-01T10:00:00'],
+  ])('rejects %s (%j)', (_name, v) => {
     expect(snoozeAtLocal(v, c)).toBeNull();
+  });
+
+  it('accepts a leap day', () => {
+    expect(snoozeAtLocal('2028-02-29T10:00', c)).toBe(Date.UTC(2028, 1, 29, 4));
+  });
+
+  describe('DST behaviour stays explicit (New York)', () => {
+    const ny: Clock = { now: Date.UTC(2026, 0, 1), tz: 'America/New_York' };
+    it('a time in the spring-forward gap shifts forward by the gap', () => {
+      // 02:30 doesn't exist on 8 Mar 2026; it becomes 03:30 EDT = 07:30Z.
+      expect(snoozeAtLocal('2026-03-08T02:30', ny)).toBe(Date.UTC(2026, 2, 8, 7, 30));
+    });
+    it('a repeated fall-back time takes the earlier occurrence', () => {
+      // 01:30 happens twice on 1 Nov 2026; the first is 01:30 EDT = 05:30Z.
+      expect(snoozeAtLocal('2026-11-01T01:30', ny)).toBe(Date.UTC(2026, 10, 1, 5, 30));
+    });
   });
 });

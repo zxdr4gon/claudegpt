@@ -5,7 +5,9 @@
 // (PARSER_VERSION → reparse). Shape migration must cover user-owned values
 // too, since reparse never touches those.
 
-import { isValidTimeZone } from '../parser/time';
+import { isCalendarDate, isValidTimeZone } from '../parser/time';
+
+export { isCalendarDate };
 import type { Item } from './item';
 
 type Json = Record<string, unknown>;
@@ -35,18 +37,6 @@ const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.is
 const isOptionalNumber = (x: unknown) => x === undefined || isNumber(x);
 const isSource = (x: unknown) => x === 'parsed' || x === 'user';
 const isTz = (x: unknown) => typeof x === 'string' && isValidTimeZone(x);
-const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
-
-/** A real calendar date in 'YYYY-MM-DD' form (rejects e.g. 2026-02-31). */
-export function isCalendarDate(x: unknown): boolean {
-  if (typeof x !== 'string') return false;
-  const m = DATE_RE.exec(x);
-  if (!m) return false;
-  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const d = new Date(Date.UTC(year, month - 1, day));
-  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
-}
-
 /** Real-world UTC offsets run from -12:00 to +14:00. */
 export const MIN_OFFSET_MINUTES = -12 * 60;
 export const MAX_OFFSET_MINUTES = 14 * 60;

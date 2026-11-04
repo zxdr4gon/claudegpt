@@ -1,7 +1,7 @@
 // Snooze presets (DECISIONS #17). Each returns the instant the snooze ends,
 // computed in the viewer's zone. Snoozing never touches the due date.
 
-import { dateIn, wallClock, zonedWallToInstant } from '../parser/time';
+import { dateIn, localToInstant, wallClock, zonedWallToInstant } from '../parser/time';
 import type { Clock } from './items';
 
 export type SnoozePreset = 'laterToday' | 'tomorrow' | 'nextWeek';
@@ -22,14 +22,15 @@ function morningOf(date: string, tz: string): number {
 
 /**
  * "Pick date/time": a local 'YYYY-MM-DDTHH:mm' (as from <input type="datetime-local">)
- * in the viewer's zone, as an instant. Null if malformed or not in the future.
+ * in the viewer's zone, as an instant. Null if malformed, not a real date or
+ * time, or not in the future. A time in a DST gap shifts forward; a repeated
+ * time takes the earlier occurrence (see localToInstant).
  */
 export function snoozeAtLocal(value: string, clock: Clock): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/u.exec(value);
-  if (!m) return null;
-  const [year, month, day, hour, minute] = m.slice(1).map(Number) as [number, number, number, number, number];
-  const at = zonedWallToInstant({ year, month, day, hour, minute, second: 0 }, clock.tz);
-  return Number.isFinite(at) && at > clock.now ? at : null;
+  const [date, time, ...rest] = value.split('T');
+  if (!date || !time || rest.length > 0) return null;
+  const at = localToInstant(date, time, clock.tz);
+  return at != null && at > clock.now ? at : null;
 }
 
 export function snoozeUntil(preset: SnoozePreset, clock: Clock): number {
