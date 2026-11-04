@@ -3,7 +3,7 @@ import { usePerform } from '../app/StoreContext';
 import type { Item } from '../model/item';
 import type { Clock } from '../model/items';
 import { actions } from '../store/actions';
-import { Chips } from './Chips';
+import { EditableChips } from './Chips';
 import { HighlightedText } from './HighlightedText';
 import { ItemMenu } from './ItemMenu';
 
@@ -83,7 +83,7 @@ export function ItemRow({ item, clock }: { item: Item; clock: Clock }) {
             <HighlightedText text={item.text} spans={done ? [] : item.spans} />
           </button>
         )}
-        <Chips item={item} clock={clock} />
+        <EditableChips item={item} clock={clock} />
       </div>
       <ItemMenu item={item} clock={clock} />
     </li>

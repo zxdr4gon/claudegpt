@@ -33,7 +33,7 @@ async function snapshot(id: string) {
   return { record, searchIds: store.index.search('dentist health monday', { includeArchived: true }) };
 }
 
-const SEED = 'call dentist monday 3pm #health #teeth !!';
+const SEED = 'call dentist monday 3pm #health #teeth !! https://example.com/dentist';
 
 describe('each action, then undo, restores the exact previous record and search entry', () => {
   const cases: [string, () => Action][] = [
@@ -48,6 +48,8 @@ describe('each action, then undo, restores the exact previous record and search 
     ['dismiss the due date', () => actions.setDue(null)],
     ['change kind', () => actions.setKind('note')],
     ['change priority', () => actions.setPriority(3)],
+    ['remove the link', () => actions.setUrl(null)],
+    ['reset a user-set field', () => actions.resetField('kind')],
     ['remove priority', () => actions.setPriority(null)],
   ];
 

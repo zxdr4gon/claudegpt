@@ -27,13 +27,17 @@ export const actions = {
     label: p ? `Priority ${p}` : 'Priority removed',
     apply: (i, c) => model.setPriority(i, p, c),
   }),
+  setUrl: (url: string | null): Action => ({
+    label: url ? 'Link changed' : 'Link removed',
+    apply: (i, c) => model.setUrl(i, url, c),
+  }),
   addTag: (tag: string): Action => ({ label: `Added #${tag}`, apply: (i, c) => model.addTag(i, tag, c) }),
   removeTag: (tag: string): Action => ({ label: `Removed #${tag}`, apply: (i, c) => model.removeTag(i, tag, c) }),
   resetField: (field: 'kind' | 'due' | 'priority' | 'url'): Action => ({
-    label: 'Reset to detected',
+    label: 'Reset to the text',
     apply: (i, c) => model.resetField(i, field, c),
   }),
-  resetTag: (tag: string): Action => ({ label: `Reset #${tag}`, apply: (i, c) => model.resetTag(i, tag, c) }),
+  resetTag: (tag: string): Action => ({ label: `Restored #${tag}`, apply: (i, c) => model.resetTag(i, tag, c) }),
 };
 
 /** Run an action on one item and record it for undo. */

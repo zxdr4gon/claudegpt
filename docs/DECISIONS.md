@@ -211,6 +211,16 @@ Undo restores, it never inverts:
 
 **Trade-off.** Restoring `updatedAt` means an undone change looks as if it never happened. That's the intended meaning of undo; for future sync, the undo itself may need a fresh `updatedAt` to win last-write-wins. Revisit with sync.
 
+## 19. Editable chips — Accepted
+
+**Decision.** Each value on a saved item is a chip that opens a menu to correct it; everything goes through the existing actions, so it's undoable (#18). What chips show is decided by `chipsFor()` (`src/model/chips.ts`), tested apart from the UI.
+- **Kind** (rows only): Mark as task/note/link.
+- **Date**: Change date… (date plus optional time; no time means all-day; impossible dates are rejected), Remove date.
+- **Tag**: Remove tag. **Priority**: change level, Remove priority. **Link**: Open link, Remove link.
+- **Provenance is visible.** Detected chips are plain highlights; user-set chips get a thin outline and "set by you" in their accessible name. A user-set value offers "Reset to what the text says".
+- **Removals are visible while relevant.** A value the user removed is shown as a struck-through chip with "Restore…", but only while the text still contains it. Once the text no longer says it, the chip disappears (the dismissal marker stays, harmlessly).
+- The capture preview's chips are read-only.
+
 ---
 
 ## Item schema
