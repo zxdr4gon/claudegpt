@@ -257,6 +257,31 @@ Nothing fires during IME composition. Single-letter commands never fire with Ctr
 
 **Verified in the browser with real keystrokes:** `j` `x` then Ctrl+Z restored the exact stored record; Ctrl+Z with an empty stack said "Nothing to undo"; Ctrl+Z inside the capture bar and inside the inline editor undid the typing there and left the app's last action alone; focus stayed on the item after `x` and returned to the row after Escape; after another tab edited the item, Ctrl+Z here was refused with the message and the other tab's edit was kept.
 
+## 22. Backup reliability and UI — Accepted
+
+The backup is the user's escape hatch, so the rules come first and are tested in `src/store/backup.test.ts`.
+
+**Reading a file.** `parseBackupFile()` refuses files over 50 MB before parsing and text that isn't JSON, with a message for the user. The envelope must be this app's format with a version this app understands; anything else is refused before any item is looked at.
+
+**Each entry** goes through shape upgrade, full validation and parser upgrade (#16). Bad entries are counted as *invalid* and skipped; they never block the valid ones.
+
+**Duplicate ids within one file.** Only the newest copy (by `updatedAt`) is considered; on a tie the first one stays. The extra copies are counted as *duplicates*.
+
+**Merge.** Per item, last-write-wins on `updatedAt` (`mergeDecision()`), the rule future sync will use. **Local wins ties**, so an import never replaces local data with something that isn't strictly newer. Deletion is just another update: a newer soft-deleted copy deletes locally, and a newer live copy restores a locally deleted item.
+
+**All or nothing.** Every valid entry is written in one transaction. If any write fails (e.g. storage quota), nothing is written, and the index and other tabs are untouched.
+
+**Preview first.** `previewImport()` uses the same decision function as the import, reads only, and reports `{ added, updated, unchanged, invalid, duplicates }`. A test checks that the preview equals the import's result and that the preview writes nothing.
+
+**UI** ("Backup and restore", a quiet link at the foot of the page):
+- *Export backup* downloads `capture-backup-YYYY-MM-DD.json` (every item, soft-deleted ones included) and records the time ("Last exported today").
+- *Choose backup file…* shows the preview in plain sentences ("Adds 1 new item. Replaces 1 item with a newer version from the file. …") and waits for *Import* or *Cancel*. Import is disabled when there's nothing to add or update. If anything would be replaced, the preview offers to export a backup of this browser first.
+- Errors say what's wrong ("This file isn't a backup from this app."); a failed import says nothing was changed.
+
+**Mutation checks.** Removing the import transaction fails the all-or-nothing test; letting ties go to the backup fails the tie and re-import tests.
+
+**Not yet:** Markdown export, and the gentle "no recent backup" hint from #4.
+
 ---
 
 ## Item schema

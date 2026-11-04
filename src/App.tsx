@@ -3,6 +3,7 @@ import { useItems, useStore, useUndoStack } from './app/StoreContext';
 import { handleShortcut, type Command } from './app/shortcuts';
 import { useNow } from './app/useNow';
 import { requestPersistentStorage } from './store/persist';
+import { BackupPanel } from './ui/BackupPanel';
 import { CAPTURE_INPUT_ID, CaptureBar } from './ui/CaptureBar';
 import { SearchPanel } from './ui/SearchPanel';
 import { UndoToast } from './ui/UndoToast';
@@ -56,6 +57,7 @@ export function App() {
   const clock = useNow();
   const [view, setView] = useState<ViewName>(initialView);
   const [searching, setSearching] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   const askedPersistence = useRef(false);
   const searchButton = useRef<HTMLButtonElement>(null);
 
@@ -79,6 +81,7 @@ export function App() {
     const run = (command: Command) => {
       switch (command) {
         case 'search':
+          setBackingUp(false);
           return setSearching(true);
         case 'undo':
           return void ready.then((store) => undo.undo(store));
@@ -143,13 +146,14 @@ export function App() {
             <li key={v.name}>
               <button
                 type="button"
-                aria-current={!searching && view === v.name ? 'page' : undefined}
+                aria-current={!searching && !backingUp && view === v.name ? 'page' : undefined}
                 onClick={() => {
                   setSearching(false);
+                  setBackingUp(false);
                   choose(v.name);
                 }}
                 className={`border-b-2 py-2.5 text-[15px] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus ${
-                  !searching && view === v.name ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
+                  !searching && !backingUp && view === v.name ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
                 }`}
               >
                 {v.label}
@@ -160,7 +164,10 @@ export function App() {
         <button
           ref={searchButton}
           type="button"
-          onClick={() => setSearching(true)}
+          onClick={() => {
+            setBackingUp(false);
+            setSearching(true);
+          }}
           aria-keyshortcuts="/ Control+K"
           className={`-mb-px flex shrink-0 items-center gap-2 border-b-2 py-2.5 text-[15px] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus ${
             searching ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
@@ -172,12 +179,28 @@ export function App() {
       </nav>
 
       <main className="pt-1">
-        {items === undefined ? null : searching ? (
+        {items === undefined ? null : backingUp ? (
+          <BackupPanel clock={clock} onClose={() => setBackingUp(false)} />
+        ) : searching ? (
           <SearchPanel items={items} clock={clock} onClose={closeSearch} />
         ) : (
           <View name={view} items={items} clock={clock} />
         )}
       </main>
+
+      <footer className="mt-auto pt-16">
+        <button
+          type="button"
+          onClick={() => {
+            setSearching(false);
+            setBackingUp(true);
+            window.scrollTo({ top: 0 });
+          }}
+          className="text-[14px] text-muted underline-offset-2 hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+        >
+          Backup and restore
+        </button>
+      </footer>
 
       <UndoToast />
     </div>
