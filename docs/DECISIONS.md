@@ -300,6 +300,8 @@ The backup is the user's escape hatch, so the rules come first and are tested in
 
 **Persistent storage** (`src/store/persist.ts`, `src/app/usePersistence.ts`):
 - Requested once, after the first capture, fire-and-forget: capture never waits for it, and it never throws.
+- One controller per page (`createPersistence`) serializes this. Every capture while a request is in flight, or after one, shares that single request, so `persist()` is called at most once per page. It is not called again on a later visit once the flag says we asked, even before that visit's first check has answered.
+- Results apply in the order their lookups started: a slow initial check that answers after a newer request can't overwrite the request's answer.
 - State is `granted`, `denied`, `not-asked` or `unsupported`. A local flag records that we asked, so after a reload "not persisted" reads as denied rather than not asked.
 - If denied or unsupported, a quiet line in the footer says the browser may clear the data when space runs low and suggests exporting a backup now and then. Nothing blocks or pops up.
 - The backup panel states the status honestly. Even when granted it says clearing site data still removes the data; it never says storage is guaranteed.

@@ -65,3 +65,69 @@ export async function requestPersistentStorage(
     return 'unsupported';
   }
 }
+
+export type Persistence = {
+  /** The latest known state; undefined until something has answered. */
+  get(): PersistState | undefined;
+  subscribe(listener: () => void): () => void;
+  /** Look up the state once per page, without asking the browser. */
+  check(): void;
+  /**
+   * Ask at most once per page (DECISIONS #23). Calls made while a request is
+   * in flight, or after one, share it. Fire and forget; never throws.
+   */
+  request(): Promise<void>;
+};
+
+/**
+ * The page's one view of persistent storage. Results are applied in the order
+ * their lookups started, so a slow initial check can never overwrite the
+ * answer to a request that began after it.
+ */
+export function createPersistence(
+  storage: () => StorageLike = storageOf,
+  asked: AskedFlag = localAskedFlag,
+): Persistence {
+  let state: PersistState | undefined;
+  let applied = 0; // sequence number of the result currently in `state`
+  let started = 0;
+  let checking = false;
+  let requesting: Promise<void> | undefined;
+  const listeners = new Set<() => void>();
+
+  const run = (lookup: () => Promise<PersistState>): Promise<void> => {
+    const seq = ++started;
+    return lookup().then(
+      (next) => {
+        if (seq < applied) return; // a newer lookup already answered
+        applied = seq;
+        if (next === state) return;
+        state = next;
+        for (const l of listeners) l();
+      },
+      () => undefined, // both lookups already catch; belt and braces
+    );
+  };
+
+  return {
+    get: () => state,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    check() {
+      if (checking) return;
+      checking = true;
+      void run(() => checkPersistentStorage(storage(), asked));
+    },
+    request() {
+      // Already settled for this browser: granted, unsupported, or denied on
+      // an earlier visit. Asking again would only nag.
+      // The flag also covers a reload where the first check hasn't answered yet.
+      if (state === 'granted' || state === 'denied' || state === 'unsupported') return Promise.resolve();
+      if (!requesting && asked.get()) return Promise.resolve();
+      requesting ??= run(() => requestPersistentStorage(storage(), asked));
+      return requesting;
+    },
+  };
+}
