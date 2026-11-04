@@ -64,3 +64,17 @@ export function shortcutFor(e: KeyLike): Command | null {
   if (e.shiftKey) return null;
   return LETTERS[e.key] ?? null;
 }
+
+type KeyEventLike = KeyLike & { preventDefault: () => void };
+
+/**
+ * The global keydown handler's whole decision. A key that isn't a command is
+ * left completely alone (no preventDefault), so the browser's own behaviour,
+ * including native undo in text fields, is untouched.
+ */
+export function handleShortcut(e: KeyEventLike, run: (command: Command) => void): void {
+  const command = shortcutFor(e);
+  if (!command) return;
+  e.preventDefault();
+  run(command);
+}

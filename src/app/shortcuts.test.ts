@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTypingTarget, shortcutFor } from './shortcuts';
+import { handleShortcut, isTypingTarget, shortcutFor, type Command } from './shortcuts';
 
 type Target = Parameters<typeof isTypingTarget>[0];
 type Mods = Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; isComposing: boolean }>;
@@ -110,5 +110,56 @@ describe('single-letter commands', () => {
   it('other keys do nothing', () => {
     expect(press('q')).toBeNull();
     expect(press('Enter')).toBeNull();
+  });
+});
+
+describe('handleShortcut (the global keydown handler)', () => {
+  function fire(key: string, target: Target, mods: Mods = {}) {
+    let prevented = false;
+    const ran: Command[] = [];
+    handleShortcut(
+      {
+        key,
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        target,
+        ...mods,
+        preventDefault: () => {
+          prevented = true;
+        },
+      },
+      (c) => ran.push(c),
+    );
+    return { prevented, ran };
+  }
+
+  it.each<[string, Target]>([
+    ['capture bar', CAPTURE_BAR],
+    ['inline text editor', INLINE_EDITOR],
+    ['date editor', DATE_EDITOR],
+    ['time editor', TIME_EDITOR],
+    ['snooze date/time picker', SNOOZE_PICKER],
+    ['search field', SEARCH_FIELD],
+  ])('leaves Ctrl+Z and Cmd+Z completely alone in the %s', (_name, target) => {
+    expect(fire('z', target, { ctrlKey: true })).toEqual({ prevented: false, ran: [] });
+    expect(fire('z', target, { metaKey: true })).toEqual({ prevented: false, ran: [] });
+  });
+
+  it('leaves typed letters and "/" alone in fields', () => {
+    for (const key of ['/', 'n', 'j', 'k', 'x', 'e']) {
+      expect(fire(key, CAPTURE_BAR)).toEqual({ prevented: false, ran: [] });
+    }
+  });
+
+  it('leaves every key alone during IME composition', () => {
+    expect(fire('z', BODY, { ctrlKey: true, isComposing: true })).toEqual({ prevented: false, ran: [] });
+  });
+
+  it('prevents the default only for keys it handles', () => {
+    expect(fire('z', BODY, { ctrlKey: true })).toEqual({ prevented: true, ran: ['undo'] });
+    expect(fire('k', CAPTURE_BAR, { ctrlKey: true })).toEqual({ prevented: true, ran: ['search'] });
+    expect(fire('q', BODY)).toEqual({ prevented: false, ran: [] });
   });
 });

@@ -213,6 +213,7 @@ describe('backup', () => {
         updated: 0,
         unchanged: 0,
         invalid: 0,
+        duplicates: 0,
       });
       const restored = await otherDb.items.toArray();
       expect(restored.map((i) => ({ ...i, createdAt: START }))).toEqual(
@@ -347,7 +348,7 @@ describe('legacy data (v1 timed due dates stored `tz` instead of `zone`)', () =>
       exportedAt: now,
       items: [...bad, good],
     });
-    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: bad.length });
+    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: bad.length, duplicates: 0 });
     expect((await db.items.toArray()).map((i) => i.id)).toEqual([good.id]);
     expect(texts(await store.search('good'))).toEqual(['good one #a']);
   });
@@ -365,7 +366,7 @@ describe('backup entries from a newer parser', () => {
       exportedAt: now,
       items: [{ ...item, parserVersion: PARSER_VERSION + 1 }, { ...item, id: 'current' }],
     });
-    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: 1 });
+    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: 1, duplicates: 0 });
     expect(await store.get(item.id)).toBeUndefined();
   });
 });

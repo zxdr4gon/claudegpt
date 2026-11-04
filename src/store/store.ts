@@ -222,32 +222,54 @@ export class ItemStore {
   }
 
   /**
-   * Merge already-validated, current-schema items. Per item, the newer
-   * `updatedAt` wins (the rule future sync will use). New items keep
-   * `capturedAt` and get `createdAt` = now; replaced ones keep the local
-   * `createdAt` (DECISIONS #9).
+   * What importing these items would do, without writing anything. Uses the
+   * same decision as importItems, so the preview can't disagree with the result.
    */
-  async importItems(items: Item[]): Promise<{ added: number; updated: number; unchanged: number }> {
+  async planImport(items: Item[]): Promise<MergeCounts> {
+    const existing = await this.db.items.bulkGet(items.map((i) => i.id));
+    const counts: MergeCounts = { added: 0, updated: 0, unchanged: 0 };
+    items.forEach((incoming, i) => counts[mergeDecision(existing[i], incoming)]++);
+    return counts;
+  }
+
+  /**
+   * Merge already-validated, current-schema items with distinct ids, in one
+   * transaction: if any write fails, nothing is written (DECISIONS #22).
+   * New items keep `capturedAt` and get `createdAt` = now; replaced ones keep
+   * the local `createdAt` (#9).
+   */
+  async importItems(items: Item[]): Promise<MergeCounts> {
     const now = this.clock().now;
-    const result = { added: 0, updated: 0, unchanged: 0 };
+    const counts: MergeCounts = { added: 0, updated: 0, unchanged: 0 };
     await this.db.transaction('rw', this.db.items, async () => {
-      for (const incoming of items) {
-        const existing = await this.db.items.get(incoming.id);
-        if (!existing) {
-          await this.db.items.add({ ...incoming, createdAt: now });
-          result.added++;
-        } else if (incoming.updatedAt > existing.updatedAt) {
-          await this.db.items.put({ ...incoming, createdAt: existing.createdAt });
-          result.updated++;
-        } else {
-          result.unchanged++;
-        }
-      }
+      const existing = await this.db.items.bulkGet(items.map((i) => i.id));
+      const writes: Item[] = [];
+      items.forEach((incoming, i) => {
+        const local = existing[i];
+        const decision = mergeDecision(local, incoming);
+        counts[decision]++;
+        if (decision === 'added') writes.push({ ...incoming, createdAt: now });
+        if (decision === 'updated') writes.push({ ...incoming, createdAt: local!.createdAt });
+      });
+      for (const item of writes) await this.db.items.put(item);
     });
     await this.rebuildIndex();
     this.announce({ type: 'all' });
-    return result;
+    return counts;
   }
 }
 
 const LAST_EXPORT_KEY = 'lastExportAt';
+
+export type MergeCounts = { added: number; updated: number; unchanged: number };
+
+/**
+ * Last-write-wins on `updatedAt`, the rule future sync will use. On a tie the
+ * local record stays: an import never replaces local data with something that
+ * isn't strictly newer. A newer soft-deleted record does replace a live one
+ * (and vice versa), since deletion is just another update.
+ */
+export function mergeDecision(local: Item | undefined, incoming: Item): keyof MergeCounts {
+  if (!local) return 'added';
+  return incoming.updatedAt > local.updatedAt ? 'updated' : 'unchanged';
+}

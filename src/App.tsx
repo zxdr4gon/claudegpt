@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useItems, useStore, useUndoStack } from './app/StoreContext';
-import { shortcutFor, type Command } from './app/shortcuts';
+import { handleShortcut, type Command } from './app/shortcuts';
 import { useNow } from './app/useNow';
 import { requestPersistentStorage } from './store/persist';
 import { CAPTURE_INPUT_ID, CaptureBar } from './ui/CaptureBar';
@@ -60,20 +60,20 @@ export function App() {
   const searchButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const command = shortcutFor({
-        key: e.key,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        altKey: e.altKey,
-        shiftKey: e.shiftKey,
-        isComposing: e.isComposing,
-        target: e.target as HTMLElement | null,
-      });
-      if (!command) return;
-      e.preventDefault();
-      run(command);
-    };
+    const onKey = (e: KeyboardEvent) =>
+      handleShortcut(
+        {
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+          shiftKey: e.shiftKey,
+          isComposing: e.isComposing,
+          target: e.target as HTMLElement | null,
+          preventDefault: () => e.preventDefault(),
+        },
+        run,
+      );
     // Each command acts through the same controls and actions as a click, so
     // everything stays undoable.
     const run = (command: Command) => {
