@@ -280,6 +280,8 @@ The backup is the user's escape hatch, so the rules come first and are tested in
 - *Choose backup file…* shows the preview in plain sentences ("Adds 1 new item. Replaces 1 item with a newer version from the file. …") and waits for *Import* or *Cancel*. Import is disabled when there's nothing to add or update. If anything would be replaced, the preview offers to export a backup of this browser first.
 - Errors say what's wrong ("This file isn't a backup from this app."); a failed import says nothing was changed.
 
+**After the commit.** `importBackup()` throws only before its transaction commits, when nothing was written, so "nothing was changed" is always true when the UI says it. After the commit nothing throws: telling other tabs can't fail the import, and the index is rebuilt by `refreshIndex()`, which never throws. If a rebuild fails, search is marked stale (`store.searchStale`) and retried with backoff (1 s, 2 s, 4 s … up to 30 s) until it succeeds or the store closes. The result's `searchReady: false` lets the UI say the import finished and search is still catching up. Other tabs' "rebuild everything" messages use the same path.
+
 **Mutation checks.** Removing the import transaction fails the all-or-nothing test; letting ties go to the backup fails the tie and re-import tests; comparing only counts for staleness fails the swapped-items test.
 
 **Not yet:** Markdown export, and the gentle "no recent backup" hint from #4.

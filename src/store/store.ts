@@ -48,6 +48,9 @@ type SyncMessage = { type: 'items'; ids: string[] } | { type: 'all' };
 export class ItemStore {
   readonly index = new SearchIndex();
   private channel: BroadcastChannel | undefined;
+  private closed = false;
+  private indexStale = false;
+  private repairTimer: ReturnType<typeof setTimeout> | undefined;
 
   private constructor(
     readonly db: CaptureDb,
@@ -63,10 +66,20 @@ export class ItemStore {
     return store;
   }
 
-  /** Stop listening to other tabs. */
+  /** Stop listening to other tabs and stop any pending index repair. */
   close(): void {
+    this.closed = true;
+    clearTimeout(this.repairTimer);
     this.channel?.close();
     this.channel = undefined;
+  }
+
+  /**
+   * True while the search index may be missing committed changes because a
+   * rebuild failed. A retry is already scheduled; the data itself is safe.
+   */
+  get searchStale(): boolean {
+    return this.indexStale;
   }
 
   private listen() {
@@ -83,8 +96,13 @@ export class ItemStore {
     this.channel = channel;
   }
 
+  /** Tell other tabs. Called after commits, so it must never throw. */
   private announce(message: SyncMessage) {
-    this.channel?.postMessage(message);
+    try {
+      this.channel?.postMessage(message);
+    } catch (error) {
+      console.warn('Could not tell other tabs about a change', error);
+    }
   }
 
   /**
@@ -92,7 +110,7 @@ export class ItemStore {
    * trusting the message, so out-of-order messages still converge.
    */
   private async applyRemote(message: SyncMessage) {
-    if (message.type === 'all') return this.rebuildIndex();
+    if (message.type === 'all') return void (await this.refreshIndex());
     const items = await this.db.items.bulkGet(message.ids);
     message.ids.forEach((id, i) => {
       const item = items[i];
@@ -103,6 +121,29 @@ export class ItemStore {
 
   async rebuildIndex(): Promise<void> {
     this.index.replaceAll(await this.db.items.toArray());
+  }
+
+  /**
+   * Rebuild the index after data has already been committed (DECISIONS #22).
+   * Never throws: the write happened regardless. If the rebuild fails, search
+   * is marked stale and retried with backoff (1 s, 2 s, 4 s … up to 30 s)
+   * until it succeeds or the store is closed. Returns whether search is current.
+   */
+  async refreshIndex(attempt = 0): Promise<boolean> {
+    clearTimeout(this.repairTimer);
+    try {
+      await this.rebuildIndex();
+      this.indexStale = false;
+      return true;
+    } catch (error) {
+      if (this.closed) return false;
+      this.indexStale = true;
+      console.warn('Search index rebuild failed; retrying', error);
+      const delay = Math.min(30_000, 1000 * 2 ** attempt);
+      this.repairTimer = setTimeout(() => void this.refreshIndex(attempt + 1), delay);
+      (this.repairTimer as { unref?: () => void }).unref?.();
+      return false;
+    }
   }
 
   /**
@@ -238,8 +279,12 @@ export class ItemStore {
    * With `expected` (the decisions a preview showed), the plan is recomputed
    * inside the same transaction and the import is refused with
    * StaleImportError, writing nothing, if any item's decision changed since.
+   *
+   * Errors are thrown only before the commit, when nothing was written. After
+   * the commit nothing throws: `searchReady: false` means the index is still
+   * catching up (see refreshIndex).
    */
-  async importItems(items: Item[], expected?: MergePlan['decisions']): Promise<MergePlan> {
+  async importItems(items: Item[], expected?: MergePlan['decisions']): Promise<MergePlan & { searchReady: boolean }> {
     const now = this.clock().now;
     const plan = await this.db.transaction('rw', this.db.items, async () => {
       const existing = await this.db.items.bulkGet(items.map((i) => i.id));
@@ -254,9 +299,10 @@ export class ItemStore {
       for (const item of writes) await this.db.items.put(item);
       return plan;
     });
-    await this.rebuildIndex();
+    // Committed. From here on the import has happened, whatever else fails.
     this.announce({ type: 'all' });
-    return plan;
+    const searchReady = await this.refreshIndex();
+    return { ...plan, searchReady };
   }
 }
 

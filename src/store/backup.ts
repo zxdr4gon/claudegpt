@@ -159,8 +159,15 @@ export async function previewImport(store: ItemStore, data: unknown): Promise<Im
  * Merge a backup into the store. All valid entries are written, or none.
  * Pass the preview the user confirmed: if any item's outcome has changed since,
  * nothing is written and StalePreviewError carries the up-to-date preview.
+ *
+ * It throws only when nothing was written. Once the data is committed it
+ * returns normally; `searchReady: false` means search is still catching up.
  */
-export async function importBackup(store: ItemStore, data: unknown, confirmed?: ImportPreview): Promise<ImportPreview> {
+export async function importBackup(
+  store: ItemStore,
+  data: unknown,
+  confirmed?: ImportPreview,
+): Promise<ImportPreview & { searchReady: boolean }> {
   const { items, invalid, duplicates } = prepare(data);
   try {
     return { ...(await store.importItems(items, confirmed?.decisions)), invalid, duplicates };

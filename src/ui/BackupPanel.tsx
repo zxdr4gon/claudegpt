@@ -110,15 +110,19 @@ export function BackupPanel({ clock, onClose }: { clock: Clock; onClose: () => v
     if (!store || !pending) return;
     setBusy(true);
     try {
+      // Everything below the await succeeded: the import is committed.
       const result = await importBackup(store, pending.data, pending.preview);
       setPending(null);
-      setMessage({ tone: 'ok', lines: ['Import finished.', ...describeResult(result, false)] });
+      const lines = ['Import finished.', ...describeResult(result, false)];
+      if (!result.searchReady) lines.push('Search is still catching up with the imported items. It keeps retrying on its own.');
+      setMessage({ tone: 'ok', lines });
     } catch (error) {
       if (error instanceof StalePreviewError) {
         // Nothing was written. Show what would happen now and ask again.
         setPending({ ...pending, preview: error.preview, refreshed: true });
         return;
       }
+      // importBackup only throws before its transaction commits, so this is true.
       const text =
         error instanceof BackupFormatError
           ? error.message

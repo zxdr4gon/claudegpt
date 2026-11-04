@@ -286,7 +286,9 @@ describe('preview', () => {
     const preview = await previewImport(store, data);
     expect(await dump(db)).toEqual(before);
     expect(preview).toMatchObject({ added: 1, updated: 0, unchanged: 1, invalid: 1, duplicates: 1 });
-    expect(await importBackup(store, data)).toEqual(preview);
+    const { searchReady, ...result } = await importBackup(store, data);
+    expect(result).toEqual(preview);
+    expect(searchReady).toBe(true);
   });
 
   it('re-importing the same backup changes nothing', async () => {
@@ -342,7 +344,9 @@ describe('stale previews (something changed between preview and confirm)', () =>
   it('confirming an up-to-date preview imports', async () => {
     const { db, store, a, file } = await setup();
     const preview = await previewImport(store, file);
-    expect(await importBackup(store, file, preview)).toEqual(preview);
+    const { searchReady, ...result } = await importBackup(store, file, preview);
+    expect(result).toEqual(preview);
+    expect(searchReady).toBe(true);
     expect((await db.items.get(a.id))?.text).toBe('alpha from file');
   });
 
@@ -389,5 +393,44 @@ describe('stale previews (something changed between preview and confirm)', () =>
   it('without a confirmed preview, import just recomputes', async () => {
     const { store, file } = await setup();
     expect(await importBackup(store, file)).toMatchObject({ updated: 2 });
+  });
+});
+
+describe('after the commit (search catching up)', () => {
+  it('a failed index rebuild after commit still reports the import as done', async () => {
+    const source = await openStore();
+    const item = await source.store.capture('imported thought');
+    const { db, store } = await openStore();
+    const spy = vi.spyOn(store, 'rebuildIndex').mockRejectedValueOnce(new Error('index broke'));
+
+    const result = await importBackup(store, backupOf([item]));
+    expect(result).toMatchObject({ added: 1, searchReady: false });
+    expect(await db.items.get(item.id)).toBeDefined(); // the data is committed
+    expect(store.searchStale).toBe(true);
+
+    // The scheduled retry (1 s) repairs search without anyone asking.
+    await vi.waitFor(() => expect(store.index.search('imported')).toEqual([item.id]), { timeout: 3000 });
+    expect(store.searchStale).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('refreshIndex can also be run directly and reports success', async () => {
+    const { store } = await openStore();
+    await store.capture('direct repair');
+    vi.spyOn(store, 'rebuildIndex').mockRejectedValueOnce(new Error('index broke'));
+    expect(await store.refreshIndex()).toBe(false);
+    expect(await store.refreshIndex()).toBe(true);
+    expect(store.index.search('repair')).toHaveLength(1);
+  });
+
+  it('closing the store stops retries', async () => {
+    const { store } = await openStore();
+    const spy = vi.spyOn(store, 'rebuildIndex').mockRejectedValue(new Error('index broke'));
+    await store.refreshIndex();
+    store.close();
+    const calls = spy.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(spy.mock.calls.length).toBe(calls);
+    spy.mockRestore();
   });
 });
