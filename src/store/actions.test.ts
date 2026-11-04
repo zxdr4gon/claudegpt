@@ -62,7 +62,7 @@ describe('each action, then undo, restores the exact previous record and search 
     expect(sameRecord(after, before.record)).toBe(false);
 
     now += HOUR;
-    expect(await undo.undo(store)).toMatchObject({ restored: true });
+    expect(await undo.undo(store)).toMatchObject({ kind: 'restored' });
     const restored = await snapshot(id);
     expect(sameRecord(restored.record, before.record)).toBe(true);
     // Timestamps included: undo is a restore, not a new edit.
@@ -119,7 +119,7 @@ describe('undo under rapid interactions', () => {
     expect(sameRecord(await db.items.get(id), v1)).toBe(true);
     await undo.undo(store);
     expect(sameRecord(await db.items.get(id), v0)).toBe(true);
-    expect(await undo.undo(store)).toBeUndefined();
+    expect(await undo.undo(store)).toEqual({ kind: 'empty' });
   });
 
   it('a double-clicked undo applies once', async () => {
@@ -129,9 +129,9 @@ describe('undo under rapid interactions', () => {
     await perform(store, undo, id, actions.complete());
     // Both start before either finishes.
     const [first, second] = await Promise.all([undo.undo(store), undo.undo(store)]);
-    expect(first).toMatchObject({ label: 'Completed', restored: true });
+    expect(first).toEqual({ kind: 'restored', label: 'Completed' });
     // The second click takes the next entry instead of re-applying the first.
-    expect(second).toMatchObject({ label: 'Added #a', restored: true });
+    expect(second).toEqual({ kind: 'restored', label: 'Added #a' });
     expect(sameRecord(await db.items.get(id), v0)).toBe(true);
     expect(undo.latest()).toBeUndefined();
   });
@@ -142,7 +142,7 @@ describe('undo under rapid interactions', () => {
     const entry = undo.latest()!;
     await perform(store, undo, id, actions.editText('newer edit'));
     const newest = await db.items.get(id);
-    expect(await undo.undoEntry(store, entry)).toEqual({ label: 'Completed', restored: false });
+    expect(await undo.undoEntry(store, entry)).toEqual({ kind: 'refused', label: 'Completed' });
     expect(sameRecord(await db.items.get(id), newest)).toBe(true);
     expect(store.index.search('newer')).toEqual([id]);
   });
@@ -156,7 +156,7 @@ describe('undo under rapid interactions', () => {
       undo.undoEntry(store, undo.latest()!),
     ]);
     const final = (await db.items.get(id))!;
-    if (undone?.restored) {
+    if (undone.kind === 'restored') {
       // The undo ran first: the edit then applied on top of the restored record.
       expect(final.text).toBe('raced edit');
       expect(final.status).toBe('open');
@@ -172,8 +172,28 @@ describe('undo under rapid interactions', () => {
     const { id } = await store.capture(SEED);
     await perform(store, undo, id, actions.complete());
     await db.items.delete(id);
-    expect(await undo.undo(store)).toMatchObject({ restored: false });
+    expect(await undo.undo(store)).toEqual({ kind: 'refused', label: 'Completed' });
     expect(await db.items.get(id)).toBeUndefined();
+  });
+
+  it('every attempt reports an outcome, including nothing to undo', async () => {
+    expect(await undo.undo(store)).toEqual({ kind: 'empty' });
+    expect(undo.outcome()).toEqual({ kind: 'empty' });
+    const { id } = await store.capture(SEED);
+    await perform(store, undo, id, actions.complete());
+    await undo.undo(store);
+    expect(undo.outcome()).toEqual({ kind: 'restored', label: 'Completed' });
+  });
+
+  it('a failed restore is reported and the entry stays undoable', async () => {
+    const { id } = await store.capture(SEED);
+    await perform(store, undo, id, actions.complete());
+    const broken = { revert: async () => Promise.reject(new Error('disk full')) } as unknown as ItemStore;
+    expect(await undo.undo(broken)).toEqual({ kind: 'failed', label: 'Completed' });
+    expect(undo.latest()?.label).toBe('Completed');
+    // Retrying with a working store succeeds.
+    expect(await undo.undo(store)).toEqual({ kind: 'restored', label: 'Completed' });
+    expect((await db.items.get(id))?.status).toBe('open');
   });
 
   it('no-op actions are not recorded', async () => {
@@ -200,7 +220,8 @@ describe('undo under rapid interactions', () => {
     await undo.undo(store);
     off();
     await perform(store, undo, id, actions.complete());
-    expect(calls).toBe(2);
+    // push, then the undo: entry taken off the stack, outcome reported.
+    expect(calls).toBe(3);
   });
 });
 

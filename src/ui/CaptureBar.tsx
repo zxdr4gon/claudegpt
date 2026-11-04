@@ -9,6 +9,9 @@ type Props = {
   onCapture: (text: string) => Promise<void>;
 };
 
+/** Lets the `n` shortcut focus the capture bar. */
+export const CAPTURE_INPUT_ID = 'capture-input';
+
 // The textarea and the highlight layer behind it must lay text out identically.
 const TEXT_LAYOUT = 'px-4 py-3.5 text-[19px] leading-7 whitespace-pre-wrap break-words';
 
@@ -71,6 +74,7 @@ export function CaptureBar({ onCapture }: Props) {
         </div>
         <textarea
           ref={ref}
+          id={CAPTURE_INPUT_ID}
           value={text}
           rows={1}
           aria-label="Capture a thought"

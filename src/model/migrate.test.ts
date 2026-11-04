@@ -54,6 +54,12 @@ describe('isCalendarDate', () => {
     ['2026-1-3', false],
     ['03/11/2026', false],
     [20261103, false],
+    // Date.UTC() would read 0099 as 1999; years before 1000 are out of range.
+    ['0099-01-01', false],
+    ['0000-01-01', false],
+    ['0999-12-31', false],
+    ['1000-01-01', true],
+    ['9999-12-31', true],
   ])('%j → %s', (input, expected) => {
     expect(isCalendarDate(input)).toBe(expected);
   });

@@ -5,13 +5,26 @@
 import { sameRecord, type Change, type ItemStore } from './store';
 
 export type UndoEntry = { label: string; change: Change };
-export type UndoResult = { label: string; restored: boolean };
+
+/**
+ * What the last undo attempt did, so the UI can always say so (#21):
+ * - restored: the previous record is back.
+ * - refused: the item changed since (here or in another tab), so nothing was overwritten.
+ * - empty: there was nothing to undo.
+ * - failed: saving the restore failed; the entry is back on the stack to retry.
+ */
+export type UndoOutcome =
+  | { kind: 'restored'; label: string }
+  | { kind: 'refused'; label: string }
+  | { kind: 'empty' }
+  | { kind: 'failed'; label: string };
 
 const LIMIT = 50;
 
 export class UndoStack {
   private entries: UndoEntry[] = [];
   private lastPushed: UndoEntry | undefined;
+  private lastOutcome: UndoOutcome | undefined;
   private listeners = new Set<() => void>();
 
   /** Record a change. No-ops (nothing actually changed) aren't recorded. */
@@ -36,31 +49,50 @@ export class UndoStack {
     return this.lastPushed;
   }
 
+  /** The result of the most recent undo attempt (a new object each time). */
+  outcome(): UndoOutcome | undefined {
+    return this.lastOutcome;
+  }
+
   /**
    * Undo the most recent change. The entry is taken off the stack before any
    * await, so rapid repeated undos can never apply the same entry twice.
-   * `restored: false` means the item changed again since (or is gone), and
-   * nothing was overwritten.
    */
-  async undo(store: ItemStore): Promise<UndoResult | undefined> {
+  async undo(store: ItemStore): Promise<UndoOutcome> {
     const entry = this.entries.pop();
-    if (!entry) return undefined;
-    this.emit();
-    return { label: entry.label, restored: await store.revert(entry.change) };
+    if (!entry) return this.report({ kind: 'empty' });
+    return this.run(store, entry);
   }
 
   /** Undo a specific entry (e.g. from its own toast), wherever it is in the stack. */
-  async undoEntry(store: ItemStore, entry: UndoEntry): Promise<UndoResult | undefined> {
+  async undoEntry(store: ItemStore, entry: UndoEntry): Promise<UndoOutcome> {
     const i = this.entries.indexOf(entry);
-    if (i < 0) return undefined;
+    if (i < 0) return this.report({ kind: 'empty' });
     this.entries.splice(i, 1);
-    this.emit();
-    return { label: entry.label, restored: await store.revert(entry.change) };
+    return this.run(store, entry);
   }
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  private async run(store: ItemStore, entry: UndoEntry): Promise<UndoOutcome> {
+    this.emit();
+    try {
+      const restored = await store.revert(entry.change);
+      return this.report({ kind: restored ? 'restored' : 'refused', label: entry.label });
+    } catch {
+      // Nothing was written; keep the entry so the user can try again.
+      this.entries.push(entry);
+      return this.report({ kind: 'failed', label: entry.label });
+    }
+  }
+
+  private report(outcome: UndoOutcome): UndoOutcome {
+    this.lastOutcome = outcome;
+    this.emit();
+    return outcome;
   }
 
   private emit() {

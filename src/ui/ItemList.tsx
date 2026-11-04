@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePerform } from '../app/StoreContext';
 import type { Item } from '../model/item';
 import type { Clock } from '../model/items';
@@ -7,8 +7,12 @@ import { EditableChips } from './Chips';
 import { HighlightedText } from './HighlightedText';
 import { ItemMenu } from './ItemMenu';
 
-/** Inline text editing: Enter saves, Escape cancels, Shift+Enter adds a line. */
-function TextEditor({ item, onDone }: { item: Item; onDone: () => void }) {
+/**
+ * Inline text editing: Enter saves, Escape cancels, Shift+Enter adds a line.
+ * `onDone(returnFocus)`: Enter and Escape hand focus back to the row; a blur
+ * (the user clicked elsewhere) doesn't take it back.
+ */
+function TextEditor({ item, onDone }: { item: Item; onDone: (returnFocus: boolean) => void }) {
   const perform = usePerform();
   const [value, setValue] = useState(item.text);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -22,14 +26,14 @@ function TextEditor({ item, onDone }: { item: Item; onDone: () => void }) {
     el.style.height = `${el.scrollHeight}px`;
   }, [value]);
 
-  function finish(saveIt: boolean) {
+  function finish(saveIt: boolean, returnFocus: boolean) {
     if (finished.current) return;
     finished.current = true;
-    onDone();
+    onDone(returnFocus);
     const text = value.trim();
     if (saveIt && text && text !== item.text) void perform(item.id, actions.editText(text));
   }
-  const save = () => finish(true);
+
 
   return (
     <textarea
@@ -39,14 +43,14 @@ function TextEditor({ item, onDone }: { item: Item; onDone: () => void }) {
       aria-label="Edit text"
       value={value}
       onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
+      onBlur={() => finish(true, false)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
           e.preventDefault();
-          save();
+          finish(true, true);
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          finish(false);
+          finish(false, true);
         }
       }}
       className="-mx-1.5 block w-[calc(100%+0.75rem)] resize-none rounded-md border border-focus/60 bg-raised px-1.5 text-[17px] leading-7 outline-none ring-2 ring-focus/20"
@@ -57,10 +61,18 @@ function TextEditor({ item, onDone }: { item: Item; onDone: () => void }) {
 export function ItemRow({ item, clock }: { item: Item; clock: Clock }) {
   const perform = usePerform();
   const [editing, setEditing] = useState(false);
+  const textButton = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
   const done = item.status === 'done';
 
+  useEffect(() => {
+    if (editing || !returnFocus.current) return;
+    returnFocus.current = false;
+    textButton.current?.focus();
+  }, [editing]);
+
   return (
-    <li className="flex items-start gap-3 border-b border-rule py-3 last:border-b-0">
+    <li data-item-id={item.id} className="flex items-start gap-3 border-b border-rule py-3 last:border-b-0">
       <input
         type="checkbox"
         checked={done}
@@ -70,11 +82,19 @@ export function ItemRow({ item, clock }: { item: Item; clock: Clock }) {
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         {editing ? (
-          <TextEditor item={item} onDone={() => setEditing(false)} />
+          <TextEditor
+            item={item}
+            onDone={(back) => {
+              returnFocus.current = back;
+              setEditing(false);
+            }}
+          />
         ) : (
           <button
+            ref={textButton}
             type="button"
             onClick={() => setEditing(true)}
+            data-row-focus
             aria-label={`Edit: ${item.text}`}
             className={`-mx-1.5 rounded-md px-1.5 text-left text-[17px] leading-7 [overflow-wrap:anywhere] hover:bg-rule/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus ${
               done ? 'text-muted line-through decoration-muted/60' : ''

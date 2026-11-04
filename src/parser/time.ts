@@ -99,12 +99,21 @@ export function dateIn(at: number, tz: string): string {
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
 const TIME_RE = /^(\d{2}):(\d{2})$/u;
 
-/** A real calendar date in 'YYYY-MM-DD' form (rejects e.g. 2026-02-31, month 13). */
+/**
+ * Supported years. Date.UTC() reads years 0–99 as 1900–1999, and every
+ * conversion here goes through it, so earlier years are out of range rather
+ * than silently shifted. Nothing in a personal organizer needs them.
+ */
+export const MIN_YEAR = 1000;
+export const MAX_YEAR = 9999;
+
+/** A real calendar date in 'YYYY-MM-DD' form within MIN_YEAR..MAX_YEAR (rejects e.g. 2026-02-31, month 13). */
 export function isCalendarDate(x: unknown): x is string {
   if (typeof x !== 'string') return false;
   const m = DATE_RE.exec(x);
   if (!m) return false;
   const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (year < MIN_YEAR || year > MAX_YEAR) return false;
   const d = new Date(Date.UTC(year, month - 1, day));
   return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }

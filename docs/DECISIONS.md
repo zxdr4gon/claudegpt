@@ -233,6 +233,30 @@ Undo restores, it never inverts:
 
 **Tests.** `src/store/search-sync.test.ts`: each transition (edit, tag correction, archive, delete, complete, and undo of each) is reflected in search immediately, subscribers are notified only on real changes, and two stores on one database stay in sync over a real BroadcastChannel in both directions, including import and purge. `src/app/shortcuts.test.ts` covers the shortcut rule. Verified in the browser with two real tabs: a capture and a delete in one tab updated the other tab's open search without reload.
 
+## 21. Keyboard shortcuts and undo feedback — Accepted
+
+**Shortcuts** (one pure rule, `shortcutFor()` in `src/app/shortcuts.ts`):
+
+| Key | Does | Fires when |
+|---|---|---|
+| `/` | Open search | Not typing in a field |
+| Ctrl/Cmd+K | Open search | Anywhere (it never types a character) |
+| Ctrl/Cmd+Z | Undo the app's last action | Not typing in a field. In the capture bar, inline editor, date/time editors, snooze picker and search field it stays the field's own undo |
+| `n` | Focus the capture bar | Not typing |
+| `j` / `k` | Next / previous item | Not typing |
+| `x` | Complete or reopen the focused item | Not typing |
+| `e` | Edit the focused item's text | Not typing |
+
+Nothing fires during IME composition. Single-letter commands never fire with Ctrl, Cmd, Alt or Shift. Ctrl+Shift+Z and Ctrl+Alt+Z are left to the browser. Commands act through the same controls as a click (`x` clicks the row's checkbox), so everything stays undoable.
+
+**Focus.** Enter or Escape in the inline editor returns focus to that row; clicking elsewhere (blur) doesn't pull it back. After `x` moves an item between sections (which re-mounts its row), focus stays on that item, or on the row now in its place if it left the view.
+
+**Undo is never silent.** Every attempt, from the toast or Ctrl+Z, reports an outcome that the toast shows: *Undone: …*; *Couldn't undo "…": that item has changed since* (refused, nothing overwritten); *Nothing to undo*; or *Couldn't undo "…". Try again* (the restore failed to save; the entry goes back on the stack so a retry works).
+
+**Dates.** Supported years are 1000–9999 (`MIN_YEAR`/`MAX_YEAR`): `Date.UTC()` reads years 0–99 as 1900–1999, so earlier years are rejected rather than silently shifted.
+
+**Verified in the browser with real keystrokes:** `j` `x` then Ctrl+Z restored the exact stored record; Ctrl+Z with an empty stack said "Nothing to undo"; Ctrl+Z inside the capture bar and inside the inline editor undid the typing there and left the app's last action alone; focus stayed on the item after `x` and returned to the row after Escape; after another tab edited the item, Ctrl+Z here was refused with the message and the other tab's edit was kept.
+
 ---
 
 ## Item schema
