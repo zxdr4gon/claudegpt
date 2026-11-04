@@ -53,6 +53,24 @@ function createMiniSearch(): MiniSearch<Doc> {
 
 export class SearchIndex {
   private ms = createMiniSearch();
+  private version = 0;
+  private listeners = new Set<() => void>();
+
+  /** Called after every change to the index, so open searches re-run (DECISIONS #20). */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** Increments on every change; a cheap snapshot for useSyncExternalStore. */
+  getVersion(): number {
+    return this.version;
+  }
+
+  private changed() {
+    this.version++;
+    for (const l of this.listeners) l();
+  }
 
   /** Rebuild from scratch. Deleted items are never indexed. */
   replaceAll(items: Iterable<Item>): void {
@@ -60,6 +78,7 @@ export class SearchIndex {
     const docs: Doc[] = [];
     for (const item of items) if (item.deletedAt == null) docs.push(toDoc(item));
     this.ms.addAll(docs);
+    this.changed();
   }
 
   /** Add, update or (for deleted items) drop one item. */
@@ -71,10 +90,13 @@ export class SearchIndex {
     const doc = toDoc(item);
     if (this.ms.has(item.id)) this.ms.replace(doc);
     else this.ms.add(doc);
+    this.changed();
   }
 
   remove(id: string): void {
-    if (this.ms.has(id)) this.ms.discard(id);
+    if (!this.ms.has(id)) return;
+    this.ms.discard(id);
+    this.changed();
   }
 
   get size(): number {

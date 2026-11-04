@@ -1,8 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useItems, useStore } from './app/StoreContext';
+import { shortcutFor } from './app/shortcuts';
 import { useNow } from './app/useNow';
 import { requestPersistentStorage } from './store/persist';
 import { CaptureBar } from './ui/CaptureBar';
+import { SearchPanel } from './ui/SearchPanel';
 import { UndoToast } from './ui/UndoToast';
 import { View, VIEWS, type ViewName } from './ui/Views';
 
@@ -23,7 +25,33 @@ export function App() {
   const items = useItems();
   const clock = useNow();
   const [view, setView] = useState<ViewName>(initialView);
+  const [searching, setSearching] = useState(false);
   const askedPersistence = useRef(false);
+  const searchButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const command = shortcutFor({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        isComposing: e.isComposing,
+        target: e.target as HTMLElement | null,
+      });
+      if (command !== 'search') return;
+      e.preventDefault();
+      setSearching(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  function closeSearch() {
+    setSearching(false);
+    // Put focus back where search was opened from, not into the capture bar.
+    requestAnimationFrame(() => searchButton.current?.focus());
+  }
 
   const capture = useCallback(
     async (text: string) => {
@@ -53,16 +81,19 @@ export function App() {
         <CaptureBar onCapture={capture} />
       </header>
 
-      <nav aria-label="Views" className="mt-4 border-b border-rule">
+      <nav aria-label="Views" className="mt-4 flex items-end justify-between gap-4 border-b border-rule">
         <ul className="-mb-px flex gap-5 overflow-x-auto">
           {VIEWS.map((v) => (
             <li key={v.name}>
               <button
                 type="button"
-                aria-current={view === v.name ? 'page' : undefined}
-                onClick={() => choose(v.name)}
+                aria-current={!searching && view === v.name ? 'page' : undefined}
+                onClick={() => {
+                  setSearching(false);
+                  choose(v.name);
+                }}
                 className={`border-b-2 py-2.5 text-[15px] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus ${
-                  view === v.name ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
+                  !searching && view === v.name ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
                 }`}
               >
                 {v.label}
@@ -70,10 +101,26 @@ export function App() {
             </li>
           ))}
         </ul>
+        <button
+          ref={searchButton}
+          type="button"
+          onClick={() => setSearching(true)}
+          aria-keyshortcuts="/ Control+K"
+          className={`-mb-px flex shrink-0 items-center gap-2 border-b-2 py-2.5 text-[15px] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus ${
+            searching ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
+          }`}
+        >
+          Search
+          <kbd className="hidden rounded border border-rule px-1.5 text-[12px] font-normal text-muted sm:inline">/</kbd>
+        </button>
       </nav>
 
       <main className="pt-1">
-        {items === undefined ? null : <View name={view} items={items} clock={clock} />}
+        {items === undefined ? null : searching ? (
+          <SearchPanel items={items} clock={clock} onClose={closeSearch} />
+        ) : (
+          <View name={view} items={items} clock={clock} />
+        )}
       </main>
 
       <UndoToast />

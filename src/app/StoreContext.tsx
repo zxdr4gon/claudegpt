@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { openDb, type CaptureDb } from '../db';
 import type { Item } from '../model/item';
 import { perform, type Action } from '../store/actions';
@@ -61,5 +61,29 @@ export function usePerform(): (id: string, action: Action) => Promise<void> {
       await perform(await ready, undo, id, action);
     },
     [ready, undo],
+  );
+}
+
+/** The store once it's open; undefined until then. */
+export function useOpenStore(): ItemStore | undefined {
+  const { ready } = useHandle();
+  const [store, setStore] = useState<ItemStore>();
+  useEffect(() => {
+    let live = true;
+    void ready.then((s) => live && setStore(s));
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+  return store;
+}
+
+const noop = () => () => {};
+
+/** Re-renders whenever the search index changes, here or from another tab. */
+export function useIndexVersion(store: ItemStore | undefined): number {
+  return useSyncExternalStore(
+    store ? (cb) => store.index.subscribe(cb) : noop,
+    () => store?.index.getVersion() ?? -1,
   );
 }

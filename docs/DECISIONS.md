@@ -177,7 +177,7 @@ Tracking by position rather than by text means duplicates can't inherit each oth
 
 Markdown export comes with the UI.
 
-**Known limitation.** The index is per tab. If the app is open in two tabs, writes in one reach the other's database (and Dexie `liveQuery` views) but not its search index until reload. Fix when the UI exists, via Dexie's cross-tab change events.
+**Cross-tab.** Each tab has its own index, kept in step without reloads (see #20).
 
 **Tests.** `src/store/store.test.ts` runs the real store against `fake-indexeddb`.
 
@@ -220,6 +220,18 @@ Undo restores, it never inverts:
 - **Provenance is visible.** Detected chips are plain highlights; user-set chips get a thin outline and "set by you" in their accessible name. A user-set value offers "Reset to what the text says".
 - **Removals are visible while relevant.** A value the user removed is shown as a struck-through chip with "Restore…", but only while the text still contains it. Once the text no longer says it, the chip disappears (the dismissal marker stays, harmlessly).
 - The capture preview's chips are read-only.
+
+## 20. Search UI and cross-tab index sync — Accepted
+
+**Search UI.** `/` (when not typing) or Ctrl/Cmd+K (from anywhere; it never types a character) opens search in place of the current view. The capture bar stays on top and keeps saving on Enter. Escape or Close returns to the view. "Include archived" is an explicit toggle. Results are full item rows, so every action works from them.
+
+**Results stay current.** Ranking comes from the index; the rows come from the live item list. The index notifies subscribers on every change (`SearchIndex.subscribe` / `getVersion`), so an open search re-runs after any edit, correction, archive, delete, restore or undo, with no reload. No-op actions don't touch the index.
+
+**Cross-tab sync.** After each write, `ItemStore` posts the changed ids on a `BroadcastChannel` named per database (`{ type: 'items', ids }`, or `{ type: 'all' }` after an import, purge or parser upgrade). Other tabs re-read those records from the database and upsert or remove them in their own index; they never trust the message's content, so messages arriving out of order still converge. Item lists in other tabs already update through Dexie. A failed remote update is caught and logged; it can't break the tab.
+
+**Shortcut rule** (`src/app/shortcuts.ts`): shortcuts never fire during IME composition, and `/` never fires while focus is in a text-like input, textarea, select or contenteditable element. A focused checkbox or button doesn't count as typing.
+
+**Tests.** `src/store/search-sync.test.ts`: each transition (edit, tag correction, archive, delete, complete, and undo of each) is reflected in search immediately, subscribers are notified only on real changes, and two stores on one database stay in sync over a real BroadcastChannel in both directions, including import and purge. `src/app/shortcuts.test.ts` covers the shortcut rule. Verified in the browser with two real tabs: a capture and a delete in one tab updated the other tab's open search without reload.
 
 ---
 

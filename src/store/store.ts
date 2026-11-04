@@ -39,8 +39,15 @@ export class ItemNotFoundError extends Error {
   }
 }
 
+/**
+ * Tells other tabs which items this tab wrote, so they can update their own
+ * search index (DECISIONS #20). Their item lists update through Dexie already.
+ */
+type SyncMessage = { type: 'items'; ids: string[] } | { type: 'all' };
+
 export class ItemStore {
   readonly index = new SearchIndex();
+  private channel: BroadcastChannel | undefined;
 
   private constructor(
     readonly db: CaptureDb,
@@ -50,9 +57,48 @@ export class ItemStore {
   /** Open the store: upgrade items parsed by an older parser, then build the index. */
   static async open(db: CaptureDb, clock: () => Clock): Promise<ItemStore> {
     const store = new ItemStore(db, clock);
-    await store.reparseOutdated();
+    store.listen();
+    if ((await store.reparseOutdated()) > 0) store.announce({ type: 'all' });
     await store.rebuildIndex();
     return store;
+  }
+
+  /** Stop listening to other tabs. */
+  close(): void {
+    this.channel?.close();
+    this.channel = undefined;
+  }
+
+  private listen() {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel(`capture-items:${this.db.name}`);
+    // In Node (tests) an open channel would keep the process alive.
+    (channel as { unref?: () => void }).unref?.();
+    channel.onmessage = (e: MessageEvent<SyncMessage>) => {
+      this.applyRemote(e.data).catch((error: unknown) => {
+        // After close() (e.g. the tab is going away) there's nothing to update.
+        if (this.channel) console.warn('Could not apply a change from another tab to search', error);
+      });
+    };
+    this.channel = channel;
+  }
+
+  private announce(message: SyncMessage) {
+    this.channel?.postMessage(message);
+  }
+
+  /**
+   * Another tab wrote these items. Re-read them from the database rather than
+   * trusting the message, so out-of-order messages still converge.
+   */
+  private async applyRemote(message: SyncMessage) {
+    if (message.type === 'all') return this.rebuildIndex();
+    const items = await this.db.items.bulkGet(message.ids);
+    message.ids.forEach((id, i) => {
+      const item = items[i];
+      if (item) this.index.upsert(item);
+      else this.index.remove(id);
+    });
   }
 
   async rebuildIndex(): Promise<void> {
@@ -96,6 +142,7 @@ export class ItemStore {
     const item = model.createItem(text, this.clock());
     await this.db.items.add(item);
     this.index.upsert(item);
+    this.announce({ type: 'items', ids: [item.id] });
     return item;
   }
 
@@ -111,7 +158,10 @@ export class ItemStore {
       if (after !== before) await this.db.items.put(after);
       return { before, after };
     });
-    this.index.upsert(result.after);
+    if (result.after !== result.before) {
+      this.index.upsert(result.after);
+      this.announce({ type: 'items', ids: [result.after.id] });
+    }
     return result;
   }
 
@@ -132,7 +182,10 @@ export class ItemStore {
       await this.db.items.put(before);
       return true;
     });
-    if (reverted) this.index.upsert(before);
+    if (reverted) {
+      this.index.upsert(before);
+      this.announce({ type: 'items', ids: [before.id] });
+    }
     return reverted;
   }
 
@@ -145,7 +198,10 @@ export class ItemStore {
   /** Hard-delete items soft-deleted more than the retention period ago. */
   async purgeDeleted(): Promise<number> {
     const cutoff = this.clock().now - DELETE_RETENTION_MS;
-    return this.db.items.where('deletedAt').below(cutoff).delete();
+    const purged = await this.db.items.where('deletedAt').below(cutoff).delete();
+    // Soft-deleted items aren't indexed, so no index change; just keep tabs in step.
+    if (purged > 0) this.announce({ type: 'all' });
+    return purged;
   }
 
   // --- Backup support ----------------------------------------------------------
@@ -189,6 +245,7 @@ export class ItemStore {
       }
     });
     await this.rebuildIndex();
+    this.announce({ type: 'all' });
     return result;
   }
 }
