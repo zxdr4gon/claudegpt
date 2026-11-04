@@ -4,15 +4,19 @@ import type { Clock } from '../model/items';
 import { dateIn } from '../parser/time';
 import {
   BackupFormatError,
+  StalePreviewError,
+  checkBackupSize,
   exportBackup,
   importBackup,
   parseBackupFile,
   previewImport,
+  type ImportPreview,
   type ImportResult,
 } from '../store/backup';
 import { formatDay } from './format';
 
-type Pending = { fileName: string; data: unknown; preview: ImportResult };
+/** `refreshed`: the preview was recomputed at confirm because something changed. */
+type Pending = { fileName: string; data: unknown; preview: ImportPreview; refreshed?: boolean };
 
 function plural(n: number, one: string, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
@@ -24,7 +28,10 @@ function describeResult(r: ImportResult, future: boolean): string[] {
   const verb = (now: string, later: string) => (future ? later : now);
   if (r.added) lines.push(`${verb('Added', 'Adds')} ${plural(r.added, 'new item')}.`);
   if (r.updated) lines.push(`${verb('Replaced', 'Replaces')} ${plural(r.updated, 'item')} with a newer version from the file.`);
-  if (r.unchanged) lines.push(`${verb('Left', 'Leaves')} ${plural(r.unchanged, 'item')} as they are (already up to date here).`);
+  if (r.unchanged) {
+    const state = r.unchanged === 1 ? 'as it is' : 'as they are';
+    lines.push(`${verb('Left', 'Leaves')} ${plural(r.unchanged, 'item')} ${state} (already up to date here).`);
+  }
   if (r.invalid) lines.push(`${verb('Skipped', 'Skips')} ${plural(r.invalid, 'entry', 'entries')} that couldn’t be read.`);
   if (r.duplicates) lines.push(`${verb('Ignored', 'Ignores')} ${plural(r.duplicates, 'duplicate entry', 'duplicate entries')}.`);
   if (lines.length === 0) lines.push('The file has no items.');
@@ -86,6 +93,8 @@ export function BackupPanel({ clock, onClose }: { clock: Clock; onClose: () => v
     setPending(null);
     setBusy(true);
     try {
+      // Refuse oversized files by their byte size, before reading them at all.
+      checkBackupSize(file.size);
       const data = parseBackupFile(await file.text());
       setPending({ fileName: file.name, data, preview: await previewImport(store, data) });
     } catch (error) {
@@ -101,10 +110,15 @@ export function BackupPanel({ clock, onClose }: { clock: Clock; onClose: () => v
     if (!store || !pending) return;
     setBusy(true);
     try {
-      const result = await importBackup(store, pending.data);
+      const result = await importBackup(store, pending.data, pending.preview);
       setPending(null);
       setMessage({ tone: 'ok', lines: ['Import finished.', ...describeResult(result, false)] });
     } catch (error) {
+      if (error instanceof StalePreviewError) {
+        // Nothing was written. Show what would happen now and ask again.
+        setPending({ ...pending, preview: error.preview, refreshed: true });
+        return;
+      }
       const text =
         error instanceof BackupFormatError
           ? error.message
@@ -172,6 +186,12 @@ export function BackupPanel({ clock, onClose }: { clock: Clock; onClose: () => v
 
         {pending && (
           <div className="mt-2 flex flex-col gap-3 rounded-lg border border-rule bg-raised p-4" role="region" aria-label="Import preview">
+            {pending.refreshed && (
+              <p role="alert" className="text-[15px] leading-6">
+                Something changed since you chose this file, perhaps in another tab, so nothing was imported. The summary
+                below is up to date. Check it and import again.
+              </p>
+            )}
             <p className="text-[15px] font-medium [overflow-wrap:anywhere]">Importing “{pending.fileName}”:</p>
             <ul className="list-disc pl-5 text-[15px] leading-6">
               {describeResult(pending.preview, true).map((line) => (

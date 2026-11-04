@@ -5,7 +5,7 @@ import type { Item } from '../model/item';
 import { reparse } from '../model/items';
 import { isValidItem, upgradeShape } from '../model/migrate';
 import { PARSER_VERSION } from '../parser/parse';
-import type { ItemStore, MergeCounts } from './store';
+import { StaleImportError, type ItemStore, type MergeCounts, type MergeDecision } from './store';
 
 export const BACKUP_FORMAT = 'claudegpt-backup';
 /** Bump when the envelope changes. Item shape changes are handled by upgradeShape. */
@@ -26,14 +26,57 @@ export type Backup = {
  */
 export type ImportResult = MergeCounts & { invalid: number; duplicates: number };
 
+/** A preview also records the decision for each item, so confirm can detect changes. */
+export type ImportPreview = ImportResult & { decisions: Record<string, MergeDecision> };
+
+/**
+ * Something changed (e.g. in another tab) between preview and confirm, so the
+ * preview no longer describes what would happen. Nothing was written; show
+ * `preview` and ask again.
+ */
+export class StalePreviewError extends Error {
+  constructor(readonly preview: ImportPreview) {
+    super('What this import would do has changed since you previewed it.');
+  }
+}
+
 export class BackupFormatError extends Error {}
 
-/** Larger files are refused before parsing, to keep the tab responsive. */
+/** Larger files are refused before reading, to keep the tab responsive. Measured in bytes. */
 export const MAX_BACKUP_BYTES = 50 * 1024 * 1024;
 
+const TOO_LARGE = 'This file is too large to be a backup.';
+
+/** Check a file's size in bytes (e.g. `File.size`) before reading it at all. */
+export function checkBackupSize(bytes: number, maxBytes = MAX_BACKUP_BYTES): void {
+  if (bytes > maxBytes) throw new BackupFormatError(TOO_LARGE);
+}
+
+/**
+ * The UTF-8 encoded size of a string, without allocating the encoding.
+ * `text.length` counts UTF-16 code units and undercounts non-ASCII text.
+ */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) bytes += 1;
+    else if (c < 0x800) bytes += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4; // a surrogate pair is one 4-byte character
+        i++;
+      } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 /** Read a backup file's text. Throws BackupFormatError with a message for the user. */
-export function parseBackupFile(text: string, maxLength = MAX_BACKUP_BYTES): unknown {
-  if (text.length > maxLength) throw new BackupFormatError('This file is too large to be a backup.');
+export function parseBackupFile(text: string, maxBytes = MAX_BACKUP_BYTES): unknown {
+  // Each UTF-16 code unit is at most 3 UTF-8 bytes, so short text skips the count.
+  if (text.length * 3 > maxBytes && utf8ByteLength(text) > maxBytes) throw new BackupFormatError(TOO_LARGE);
   try {
     return JSON.parse(text);
   } catch {
@@ -74,8 +117,15 @@ function prepare(data: unknown): Prepared {
   if (typeof backup !== 'object' || backup === null || backup.format !== BACKUP_FORMAT || !Array.isArray(backup.items)) {
     throw new BackupFormatError('This file isn’t a backup from this app.');
   }
-  if (typeof backup.version !== 'number' || backup.version > BACKUP_VERSION) {
+  const version = backup.version;
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+    throw new BackupFormatError('This file isn’t a backup from this app.');
+  }
+  if (version > BACKUP_VERSION) {
     throw new BackupFormatError('This backup was made by a newer version of the app.');
+  }
+  if (typeof backup.exportedAt !== 'number' || !Number.isFinite(backup.exportedAt)) {
+    throw new BackupFormatError('This file isn’t a backup from this app.');
   }
 
   const byId = new Map<string, Item>();
@@ -100,13 +150,22 @@ function prepare(data: unknown): Prepared {
 }
 
 /** What importing would do, without writing anything. */
-export async function previewImport(store: ItemStore, data: unknown): Promise<ImportResult> {
+export async function previewImport(store: ItemStore, data: unknown): Promise<ImportPreview> {
   const { items, invalid, duplicates } = prepare(data);
   return { ...(await store.planImport(items)), invalid, duplicates };
 }
 
-/** Merge a backup into the store. All valid entries are written, or none. */
-export async function importBackup(store: ItemStore, data: unknown): Promise<ImportResult> {
+/**
+ * Merge a backup into the store. All valid entries are written, or none.
+ * Pass the preview the user confirmed: if any item's outcome has changed since,
+ * nothing is written and StalePreviewError carries the up-to-date preview.
+ */
+export async function importBackup(store: ItemStore, data: unknown, confirmed?: ImportPreview): Promise<ImportPreview> {
   const { items, invalid, duplicates } = prepare(data);
-  return { ...(await store.importItems(items)), invalid, duplicates };
+  try {
+    return { ...(await store.importItems(items, confirmed?.decisions)), invalid, duplicates };
+  } catch (error) {
+    if (error instanceof StaleImportError) throw new StalePreviewError({ ...error.plan, invalid, duplicates });
+    throw error;
+  }
 }

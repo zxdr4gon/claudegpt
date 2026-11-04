@@ -11,10 +11,13 @@ import { actions, perform } from './actions';
 import {
   BACKUP_FORMAT,
   BackupFormatError,
+  StalePreviewError,
+  checkBackupSize,
   exportBackup,
   importBackup,
   parseBackupFile,
   previewImport,
+  utf8ByteLength,
   type Backup,
 } from './backup';
 import { ItemStore, sameRecord } from './store';
@@ -69,6 +72,31 @@ describe('reading a backup file', () => {
   it('refuses files over the size limit before parsing', () => {
     expect(() => parseBackupFile('{"format":"x"}', 10)).toThrow(/too large/);
   });
+
+  it('measures the limit in UTF-8 bytes, not string length', () => {
+    // 6 characters but 14 bytes: each 日 is 3 bytes in UTF-8.
+    const text = '"日日日日"';
+    expect(text.length).toBe(6);
+    expect(() => parseBackupFile(text, 10)).toThrow(/too large/);
+    expect(parseBackupFile('"abcd"', 10)).toBe('abcd');
+  });
+
+  it.each<[string, string, number]>([
+    ['ASCII', 'abc', 3],
+    ['2-byte character', 'é', 2],
+    ['3-byte character', '日', 3],
+    ['4-byte emoji (surrogate pair)', '😀', 4],
+    ['lone surrogate (encoded as U+FFFD)', '\ud800', 3],
+    ['mixed', 'a é 日 😀', 1 + 1 + 2 + 1 + 3 + 1 + 4],
+  ])('utf8ByteLength: %s', (_name, text, bytes) => {
+    expect(utf8ByteLength(text)).toBe(bytes);
+    expect(utf8ByteLength(text)).toBe(new TextEncoder().encode(text).length);
+  });
+
+  it('checks a file’s byte size before reading it', () => {
+    expect(() => checkBackupSize(11, 10)).toThrow(/too large/);
+    expect(() => checkBackupSize(10, 10)).not.toThrow();
+  });
 });
 
 describe('malformed backups', () => {
@@ -80,8 +108,16 @@ describe('malformed backups', () => {
     ['no format', { version: 1, items: [] }],
     ['another app’s format', { format: 'other-app', version: 1, items: [] }],
     ['items not an array', { format: BACKUP_FORMAT, version: 1, items: {} }],
-    ['no version', { format: BACKUP_FORMAT, items: [] }],
-    ['version as a string', { format: BACKUP_FORMAT, version: '1', items: [] }],
+    ['no version', { format: BACKUP_FORMAT, exportedAt: 1, items: [] }],
+    ['version as a string', { format: BACKUP_FORMAT, version: '1', exportedAt: 1, items: [] }],
+    ['version 0', { format: BACKUP_FORMAT, version: 0, exportedAt: 1, items: [] }],
+    ['negative version', { format: BACKUP_FORMAT, version: -1, exportedAt: 1, items: [] }],
+    ['fractional version', { format: BACKUP_FORMAT, version: 0.5, exportedAt: 1, items: [] }],
+    ['NaN version', { format: BACKUP_FORMAT, version: NaN, exportedAt: 1, items: [] }],
+    ['no exportedAt', { format: BACKUP_FORMAT, version: 1, items: [] }],
+    ['exportedAt as a string', { format: BACKUP_FORMAT, version: 1, exportedAt: '2026-11-03', items: [] }],
+    ['exportedAt null', { format: BACKUP_FORMAT, version: 1, exportedAt: null, items: [] }],
+    ['exportedAt Infinity', { format: BACKUP_FORMAT, version: 1, exportedAt: Infinity, items: [] }],
   ])('rejects %s, writing nothing', async (_name, data) => {
     const { db, store } = await openStore();
     await store.capture('existing');
@@ -94,11 +130,12 @@ describe('malformed backups', () => {
   it('rejects a backup from a newer app version', async () => {
     const { store } = await openStore();
     await expect(importBackup(store, { ...backupOf([]), version: 2 })).rejects.toThrow(/newer version/);
+    await expect(importBackup(store, { ...backupOf([]), version: 1.5 })).rejects.toThrow(/isn’t a backup/);
   });
 
   it('an empty backup imports nothing and succeeds', async () => {
     const { store } = await openStore();
-    expect(await importBackup(store, backupOf([]))).toEqual({ added: 0, updated: 0, unchanged: 0, invalid: 0, duplicates: 0 });
+    expect(await importBackup(store, backupOf([]))).toMatchObject({ added: 0, updated: 0, unchanged: 0, invalid: 0, duplicates: 0 });
   });
 });
 
@@ -144,7 +181,7 @@ describe('partial imports', () => {
     const b = await source.store.capture('beta');
     const { db, store } = await openStore();
     const result = await importBackup(store, backupOf([a, { id: 'junk' }, 7, b, { ...a, id: 'x', status: 'later' }]));
-    expect(result).toEqual({ added: 2, updated: 0, unchanged: 0, invalid: 3, duplicates: 0 });
+    expect(result).toMatchObject({ added: 2, updated: 0, unchanged: 0, invalid: 3, duplicates: 0 });
     expect([...(await dump(db)).keys()].sort()).toEqual([a.id, b.id].sort());
   });
 
@@ -248,7 +285,7 @@ describe('preview', () => {
     const before = await dump(db);
     const preview = await previewImport(store, data);
     expect(await dump(db)).toEqual(before);
-    expect(preview).toEqual({ added: 1, updated: 0, unchanged: 1, invalid: 1, duplicates: 1 });
+    expect(preview).toMatchObject({ added: 1, updated: 0, unchanged: 1, invalid: 1, duplicates: 1 });
     expect(await importBackup(store, data)).toEqual(preview);
   });
 
@@ -284,5 +321,73 @@ describe('round trip through a file', () => {
       expect(sameRecord({ ...item, createdAt: 0 }, { ...original.get(id), createdAt: 0 })).toBe(true);
       expect(item.createdAt).toBe(now);
     }
+  });
+});
+
+describe('stale previews (something changed between preview and confirm)', () => {
+  async function setup() {
+    const source = await openStore();
+    const a = await source.store.capture('alpha');
+    const b = await source.store.capture('beta');
+    const { db, store } = await openStore();
+    await importBackup(store, backupOf([a, b]));
+    // The file's copies are an hour newer than the local ones.
+    const file = backupOf([
+      { ...a, text: 'alpha from file', updatedAt: a.updatedAt + HOUR },
+      { ...b, text: 'beta from file', updatedAt: b.updatedAt + HOUR },
+    ]);
+    return { db, store, a, b, file };
+  }
+
+  it('confirming an up-to-date preview imports', async () => {
+    const { db, store, a, file } = await setup();
+    const preview = await previewImport(store, file);
+    expect(await importBackup(store, file, preview)).toEqual(preview);
+    expect((await db.items.get(a.id))?.text).toBe('alpha from file');
+  });
+
+  it('an edit after the preview makes it stale: nothing is written, the fresh preview is returned', async () => {
+    const { db, store, a, file } = await setup();
+    const preview = await previewImport(store, file);
+    expect(preview).toMatchObject({ updated: 2, unchanged: 0 });
+
+    // e.g. another tab edits alpha after the preview was shown: local is now newer.
+    now += 2 * HOUR;
+    await store.editText(a.id, 'alpha edited in another tab');
+    const before = await dump(db);
+
+    const error = await importBackup(store, file, preview).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StalePreviewError);
+    expect((error as StalePreviewError).preview).toMatchObject({ updated: 1, unchanged: 1, invalid: 0, duplicates: 0 });
+    expect(await dump(db)).toEqual(before);
+
+    // Confirming the refreshed preview goes ahead, and keeps the newer local edit.
+    await importBackup(store, file, (error as StalePreviewError).preview);
+    expect((await db.items.get(a.id))?.text).toBe('alpha edited in another tab');
+  });
+
+  it('equal counts with different items still count as stale', async () => {
+    const { db, store, a, b } = await setup();
+    // File: alpha newer than local, beta older than local.
+    const file = backupOf([
+      { ...a, text: 'alpha from file', updatedAt: a.updatedAt + HOUR },
+      { ...b, text: 'old beta', updatedAt: b.updatedAt - HOUR },
+    ]);
+    const preview = await previewImport(store, file);
+    expect(preview).toMatchObject({ updated: 1, unchanged: 1 });
+
+    // Local alpha becomes newer and local beta older: still { updated: 1, unchanged: 1 }, but swapped.
+    now += 2 * HOUR;
+    await store.editText(a.id, 'alpha edited here');
+    await db.items.update(b.id, { updatedAt: b.updatedAt - 2 * HOUR });
+    const before = await dump(db);
+
+    await expect(importBackup(store, file, preview)).rejects.toBeInstanceOf(StalePreviewError);
+    expect(await dump(db)).toEqual(before);
+  });
+
+  it('without a confirmed preview, import just recomputes', async () => {
+    const { store, file } = await setup();
+    expect(await importBackup(store, file)).toMatchObject({ updated: 2 });
   });
 });

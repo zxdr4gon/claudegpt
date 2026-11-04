@@ -208,7 +208,7 @@ describe('backup', () => {
     try {
       now += DAY;
       const other = await openStore(otherDb);
-      expect(await importBackup(other, JSON.parse(JSON.stringify(backup)))).toEqual({
+      expect(await importBackup(other, JSON.parse(JSON.stringify(backup)))).toMatchObject({
         added: 2,
         updated: 0,
         unchanged: 0,
@@ -348,7 +348,7 @@ describe('legacy data (v1 timed due dates stored `tz` instead of `zone`)', () =>
       exportedAt: now,
       items: [...bad, good],
     });
-    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: bad.length, duplicates: 0 });
+    expect(result).toMatchObject({ added: 1, updated: 0, unchanged: 0, invalid: bad.length, duplicates: 0 });
     expect((await db.items.toArray()).map((i) => i.id)).toEqual([good.id]);
     expect(texts(await store.search('good'))).toEqual(['good one #a']);
   });
@@ -366,7 +366,7 @@ describe('backup entries from a newer parser', () => {
       exportedAt: now,
       items: [{ ...item, parserVersion: PARSER_VERSION + 1 }, { ...item, id: 'current' }],
     });
-    expect(result).toEqual({ added: 1, updated: 0, unchanged: 0, invalid: 1, duplicates: 0 });
+    expect(result).toMatchObject({ added: 1, updated: 0, unchanged: 0, invalid: 1, duplicates: 0 });
     expect(await store.get(item.id)).toBeUndefined();
   });
 });

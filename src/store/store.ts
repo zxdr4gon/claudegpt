@@ -225,11 +225,8 @@ export class ItemStore {
    * What importing these items would do, without writing anything. Uses the
    * same decision as importItems, so the preview can't disagree with the result.
    */
-  async planImport(items: Item[]): Promise<MergeCounts> {
-    const existing = await this.db.items.bulkGet(items.map((i) => i.id));
-    const counts: MergeCounts = { added: 0, updated: 0, unchanged: 0 };
-    items.forEach((incoming, i) => counts[mergeDecision(existing[i], incoming)]++);
-    return counts;
+  async planImport(items: Item[]): Promise<MergePlan> {
+    return planMerge(items, await this.db.items.bulkGet(items.map((i) => i.id)));
   }
 
   /**
@@ -237,31 +234,61 @@ export class ItemStore {
    * transaction: if any write fails, nothing is written (DECISIONS #22).
    * New items keep `capturedAt` and get `createdAt` = now; replaced ones keep
    * the local `createdAt` (#9).
+   *
+   * With `expected` (the decisions a preview showed), the plan is recomputed
+   * inside the same transaction and the import is refused with
+   * StaleImportError, writing nothing, if any item's decision changed since.
    */
-  async importItems(items: Item[]): Promise<MergeCounts> {
+  async importItems(items: Item[], expected?: MergePlan['decisions']): Promise<MergePlan> {
     const now = this.clock().now;
-    const counts: MergeCounts = { added: 0, updated: 0, unchanged: 0 };
-    await this.db.transaction('rw', this.db.items, async () => {
+    const plan = await this.db.transaction('rw', this.db.items, async () => {
       const existing = await this.db.items.bulkGet(items.map((i) => i.id));
+      const plan = planMerge(items, existing);
+      if (expected && !sameDecisions(plan.decisions, expected)) throw new StaleImportError(plan);
       const writes: Item[] = [];
       items.forEach((incoming, i) => {
-        const local = existing[i];
-        const decision = mergeDecision(local, incoming);
-        counts[decision]++;
+        const decision = plan.decisions[incoming.id];
         if (decision === 'added') writes.push({ ...incoming, createdAt: now });
-        if (decision === 'updated') writes.push({ ...incoming, createdAt: local!.createdAt });
+        if (decision === 'updated') writes.push({ ...incoming, createdAt: existing[i]!.createdAt });
       });
       for (const item of writes) await this.db.items.put(item);
+      return plan;
     });
     await this.rebuildIndex();
     this.announce({ type: 'all' });
-    return counts;
+    return plan;
   }
 }
 
 const LAST_EXPORT_KEY = 'lastExportAt';
 
 export type MergeCounts = { added: number; updated: number; unchanged: number };
+export type MergeDecision = keyof MergeCounts;
+/** Counts plus the decision for each incoming id. */
+export type MergePlan = MergeCounts & { decisions: Record<string, MergeDecision> };
+
+/** The data changed between preview and confirm; carries the fresh plan. */
+export class StaleImportError extends Error {
+  constructor(readonly plan: MergePlan) {
+    super('The data changed since the import was previewed.');
+  }
+}
+
+function planMerge(items: Item[], existing: (Item | undefined)[]): MergePlan {
+  const plan: MergePlan = { added: 0, updated: 0, unchanged: 0, decisions: {} };
+  items.forEach((incoming, i) => {
+    const decision = mergeDecision(existing[i], incoming);
+    plan[decision]++;
+    plan.decisions[incoming.id] = decision;
+  });
+  return plan;
+}
+
+/** Same ids with the same decisions; equal counts alone aren't enough. */
+function sameDecisions(a: Record<string, MergeDecision>, b: Record<string, MergeDecision>): boolean {
+  const ids = Object.keys(a);
+  return ids.length === Object.keys(b).length && ids.every((id) => a[id] === b[id]);
+}
 
 /**
  * Last-write-wins on `updatedAt`, the rule future sync will use. On a tie the
@@ -269,7 +296,7 @@ export type MergeCounts = { added: number; updated: number; unchanged: number };
  * isn't strictly newer. A newer soft-deleted record does replace a live one
  * (and vice versa), since deletion is just another update.
  */
-export function mergeDecision(local: Item | undefined, incoming: Item): keyof MergeCounts {
+export function mergeDecision(local: Item | undefined, incoming: Item): MergeDecision {
   if (!local) return 'added';
   return incoming.updatedAt > local.updatedAt ? 'updated' : 'unchanged';
 }

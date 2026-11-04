@@ -261,7 +261,7 @@ Nothing fires during IME composition. Single-letter commands never fire with Ctr
 
 The backup is the user's escape hatch, so the rules come first and are tested in `src/store/backup.test.ts`.
 
-**Reading a file.** `parseBackupFile()` refuses files over 50 MB before parsing and text that isn't JSON, with a message for the user. The envelope must be this app's format with a version this app understands; anything else is refused before any item is looked at.
+**Reading a file.** Files over 50 MB are refused by their **byte** size: the UI checks `File.size` before reading the file at all, and `parseBackupFile()` counts UTF-8 bytes of the text (`utf8ByteLength()`; `text.length` counts UTF-16 units and undercounts non-ASCII). Text that isn't JSON is refused with a message for the user. The envelope must be this app's format, with `version` a positive integer no higher than this app supports and `exportedAt` a finite timestamp; anything else is refused before any item is looked at.
 
 **Each entry** goes through shape upgrade, full validation and parser upgrade (#16). Bad entries are counted as *invalid* and skipped; they never block the valid ones.
 
@@ -271,14 +271,16 @@ The backup is the user's escape hatch, so the rules come first and are tested in
 
 **All or nothing.** Every valid entry is written in one transaction. If any write fails (e.g. storage quota), nothing is written, and the index and other tabs are untouched.
 
-**Preview first.** `previewImport()` uses the same decision function as the import, reads only, and reports `{ added, updated, unchanged, invalid, duplicates }`. A test checks that the preview equals the import's result and that the preview writes nothing.
+**Preview first.** `previewImport()` uses the same decision function as the import, reads only, and reports `{ added, updated, unchanged, invalid, duplicates }` plus the decision for each item. A test checks that the preview equals the import's result and that the preview writes nothing.
+
+**No stale previews.** Confirming passes the shown preview to `importBackup()`. Inside the import's transaction the plan is recomputed and compared **per item** (equal counts aren't enough: two items can swap outcomes). If anything differs, e.g. another tab edited an item after the preview, nothing is written and `StalePreviewError` carries the fresh preview, which the UI shows with an explanation so the user can confirm again. Because the check and the writes share one transaction, there's no window between them.
 
 **UI** ("Backup and restore", a quiet link at the foot of the page):
 - *Export backup* downloads `capture-backup-YYYY-MM-DD.json` (every item, soft-deleted ones included) and records the time ("Last exported today").
 - *Choose backup file…* shows the preview in plain sentences ("Adds 1 new item. Replaces 1 item with a newer version from the file. …") and waits for *Import* or *Cancel*. Import is disabled when there's nothing to add or update. If anything would be replaced, the preview offers to export a backup of this browser first.
 - Errors say what's wrong ("This file isn't a backup from this app."); a failed import says nothing was changed.
 
-**Mutation checks.** Removing the import transaction fails the all-or-nothing test; letting ties go to the backup fails the tie and re-import tests.
+**Mutation checks.** Removing the import transaction fails the all-or-nothing test; letting ties go to the backup fails the tie and re-import tests; comparing only counts for staleness fails the swapped-items test.
 
 **Not yet:** Markdown export, and the gentle "no recent backup" hint from #4.
 
