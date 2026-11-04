@@ -14,6 +14,8 @@ npm test           # Vitest (runs under TZ=Pacific/Chatham)
 npm run typecheck
 npm run build
 npm run preview    # serve the production build (service worker, offline)
+npm run e2e        # build, then Playwright end-to-end tests in the system Edge
+npm run e2e:only   # the same tests against the existing build
 node scripts/make-icons.mjs   # regenerate the app icons in public/
 ```
 
@@ -26,3 +28,6 @@ node scripts/make-icons.mjs   # regenerate the app icons in public/
 - `src/db.ts` — Dexie schema
 - `src/app/` — React plumbing: store context, live queries, clock
 - `src/ui/` — capture bar, views, item rows, display formatting
+- `e2e/` — Playwright tests of real browser behaviour, against the production build served by `e2e/server.mjs`
+
+The end-to-end tests use the installed Microsoft Edge (`PW_CHANNEL=chrome` for Chrome), so no Playwright browser download is needed.

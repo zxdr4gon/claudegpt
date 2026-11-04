@@ -7,5 +7,7 @@ export default defineConfig({
     // Run under an unusual host timezone so tests catch any accidental
     // dependence on the machine's local time.
     env: { TZ: 'Pacific/Chatham' },
+    // Browser tests live in e2e/ and run under Playwright (`npm run e2e`).
+    exclude: ['**/node_modules/**', 'e2e/**'],
   },
 });

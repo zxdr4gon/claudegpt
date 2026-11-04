@@ -315,6 +315,41 @@ The backup is the user's escape hatch, so the rules come first and are tested in
 
 ---
 
+## 24. End-to-end tests — Accepted
+
+**Split.** Unit tests (Vitest) own the logic: date parsing, the model, merge rules, shortcut mapping. Playwright owns what only a browser shows: real keystrokes and focus, IndexedDB across reloads and tabs, downloads and file inputs, the service worker. An end-to-end test doesn't repeat a unit-test table.
+
+**Setup** (`playwright.config.ts`, `e2e/`):
+- Runs against the **production build**, since offline and updates need the real service worker. `npm run e2e` builds first.
+- Uses the system's Edge through Playwright's `channel`, so there's no browser download. That also suits this Windows setup, where Application Control blocks some downloaded binaries.
+- `e2e/server.mjs` is a small static server that test code (never the page) can switch between two builds, or make drop every connection as if stopped.
+- `e2e/global-setup.ts` makes "build b" from the build: a marker in `index.html` plus the matching precache revision in `sw.js`, which is a real update as far as the browser is concerned.
+- One worker, because the server's build switch is shared. Each test gets a fresh browser profile.
+
+**What's covered:**
+1. *Capture and shortcuts:*
+   - Enter saves, keeps focus, and survives a reload. Shift+Enter adds a line.
+   - Enter during IME composition doesn't save. Chromium has no scriptable IME, so the test sends the keydown an IME produces, with `isComposing` set.
+   - Ctrl+Z undoes the last action outside fields and stays native undo inside them.
+   - `/` opens search except while typing. Ctrl+K opens it from the capture bar and keeps half-typed text.
+   - j/k/x/e/n, with focus kept or returned after each.
+2. *Import safety:*
+   - The backup is a real export, downloaded from another profile.
+   - The preview comes first; Cancel writes nothing, checked after a reload. Re-importing finds nothing to change.
+   - A preview made stale by another tab is refreshed and not applied.
+   - A failed transaction: IndexedDB read-write transactions are made to throw. The import reports that nothing was changed, nothing is written, and a retry imports everything.
+   - A non-backup file is refused before any preview.
+3. *Offline:*
+   - Install precaches only built files, and the manifest is valid.
+   - With the server dropping connections and the browser offline (checked: a fetch from the page fails), a reload works. Capture, edit, search and export all work, and the backup imports into a second offline profile.
+4. *Updates:* the new version is detected while text is half-typed. Nothing reloads; Later keeps version a, even across a plain reload. "Reload to update" brings in version b with all data intact and searchable.
+5. *Persistence:* `navigator.storage` is stubbed to control the answer and its timing.
+   - No request before the first capture.
+   - Three quick captures, with the browser never answering, all save at once and make exactly one request. Checked by mutation: the previous code made three.
+   - When denied: the footer note and backup text appear, and a reload doesn't ask again. When granted: no warning, with honest backup text.
+
+---
+
 ## Item schema
 
 The source of truth is `src/model/item.ts`; this copy is for reading.
