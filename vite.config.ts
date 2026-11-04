@@ -2,8 +2,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Where the app is served from. '/' locally and in the e2e tests; the GitHub
+// Pages workflow sets BASE_PATH=/claudegpt/ (DECISIONS #25).
+const base = process.env.BASE_PATH ?? '/';
+
 // Tailwind v3 runs through PostCSS (postcss.config.mjs). See DECISIONS #15.
 export default defineConfig({
+  base,
   plugins: [
     react(),
     // Installable, offline app shell (DECISIONS #23). The service worker caches
@@ -19,8 +24,8 @@ export default defineConfig({
         name: 'Capture',
         short_name: 'Capture',
         description: 'Capture anything now, find it later. Works offline; your data stays in this browser.',
-        start_url: '/',
-        scope: '/',
+        start_url: base,
+        scope: base,
         display: 'standalone',
         background_color: '#f5f7fa',
         theme_color: '#1e2833',

@@ -350,6 +350,26 @@ The backup is the user's escape hatch, so the rules come first and are tested in
 
 ---
 
+## 25. Hosting on GitHub Pages — Accepted
+
+**Why.** Installing and offline use need HTTPS (or `localhost`), so trying the app on a phone needs it hosted somewhere. GitHub Pages is free for this public repo and needs no server of our own.
+
+**What's hosted.** Only the built app's files. Item data stays in IndexedDB in the browser it was captured in. Nothing is uploaded, and there's no sync: a phone and a computer each have their own data, and backup export and import moves it between them.
+
+**How:**
+- `.github/workflows/pages.yml` runs on every push to `main`. It runs the unit tests (a failing test means no deploy), builds with `BASE_PATH=/claudegpt/`, and deploys with `actions/deploy-pages`.
+- `vite.config.ts` reads `BASE_PATH` (default `/`) for Vite's `base` and for the manifest's `start_url` and `scope`. Local development, `vite preview` and the e2e tests keep serving at `/`.
+- The repo's Pages source must be set to "GitHub Actions" once, in the repo's settings.
+
+**Verified** with a `/claudegpt/` build served under that path locally:
+- The service worker's scope is `/claudegpt/` and it controls the page after a reload.
+- The manifest's `start_url` and `scope` are `/claudegpt/`, and its icons load.
+- An offline reload shows captured items, and an offline deep link inside the scope opens the app.
+
+**Updates.** Each deploy is a new version. Installed copies show the "new version" banner and wait for the user (#23).
+
+---
+
 ## Item schema
 
 The source of truth is `src/model/item.ts`; this copy is for reading.

@@ -2,6 +2,8 @@
 
 A local-first quick-capture organizer: capture now, decide later.
 
+**Use it:** https://zxdr4gon.github.io/claudegpt/ (installable, works offline; your items stay in your browser). How to use it: [docs/USING.md](docs/USING.md).
+
 - Product scope: [docs/PRODUCT.md](docs/PRODUCT.md)
 - Decisions and item schema: [docs/DECISIONS.md](docs/DECISIONS.md)
 
